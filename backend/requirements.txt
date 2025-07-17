@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+boto3
+python-multipart
+libsql-client
+passlib[bcrypt]
+python-jose[cryptography]
+pydantic-extra-types
+bcrypt==4.0.1
