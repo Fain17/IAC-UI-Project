@@ -55,6 +55,7 @@ class DatabaseService:
                     email TEXT UNIQUE NOT NULL,
                     hashed_password TEXT NOT NULL,
                     is_active BOOLEAN DEFAULT TRUE,
+                    is_admin BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
