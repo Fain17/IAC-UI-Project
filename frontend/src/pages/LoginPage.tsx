@@ -19,9 +19,17 @@ const LoginPage: React.FC = () => {
         username_or_email: usernameOrEmail,
         password
       });
+      
+      // Store token and user info from response
       localStorage.setItem('token', response.data.access_token);
-      localStorage.setItem('user_email', response.data.user.email);
-      localStorage.setItem('username', response.data.user.username);
+      localStorage.setItem('userEmail', response.data.user.email);
+      
+      // Store admin status if provided by backend
+      if (response.data.user) {
+        localStorage.setItem('username', response.data.user.username || '');
+        localStorage.setItem('isAdmin', (!!response.data.user.is_admin).toString());
+      }
+      
       setIsLoading(false);
       navigate('/home');
     } catch (err: any) {

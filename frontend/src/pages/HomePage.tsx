@@ -40,7 +40,8 @@ const profileContainerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  zIndex: 1100
+  zIndex: 1100,
+  cursor: 'pointer'
 };
 
 const avatarStyle: React.CSSProperties = {
@@ -55,7 +56,8 @@ const avatarStyle: React.CSSProperties = {
   fontSize: 24,
   fontWeight: 700,
   userSelect: 'none',
-  boxShadow: '0 1px 4px rgba(0,0,0,0.08)'
+  boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+  transition: 'transform 0.2s ease'
 };
 
 const nameStyle: React.CSSProperties = {
@@ -122,10 +124,12 @@ const HomePage: React.FC = () => {
     } catch (err) {
       // Optionally handle error (e.g., token already invalid)
     }
-    localStorage.removeItem('token');
-    localStorage.removeItem('userEmail');
-    localStorage.removeItem('username');
+    localStorage.clear();
     navigate('/login');
+  };
+
+  const handleProfileClick = () => {
+    navigate('/admin-profile');
   };
 
   // Use username if available, otherwise use email for avatar initial
@@ -142,7 +146,11 @@ const HomePage: React.FC = () => {
         </button>
       </aside>
       <main style={contentStyle}>
-        <div style={profileContainerStyle}>
+        <div style={profileContainerStyle} onClick={handleProfileClick} onMouseEnter={(e) => {
+          e.currentTarget.querySelector('div')!.style.transform = 'scale(1.05)';
+        }} onMouseLeave={(e) => {
+          e.currentTarget.querySelector('div')!.style.transform = 'scale(1)';
+        }}>
           <div style={avatarStyle}>{initial}</div>
           {username && <div style={nameStyle}>{username}</div>}
           {email && <div style={emailStyle}>{email}</div>}

@@ -26,4 +26,8 @@ export const createMapping = (instance: string, launch_template: string): Promis
 export const deleteMapping = (instance: string): Promise<AxiosResponse> =>
   API.post('/api/delete-mapping', { instance });
 export const runLaunchUpdate = (instance: string, launch_template: string): Promise<AxiosResponse> =>
-  API.post('/api/run-json', { server: instance, lt: launch_template }); 
+  API.post('/api/run-json', { server: instance, lt: launch_template });
+
+// Check if there are any existing users (for first user detection)
+export const checkFirstUser = (): Promise<AxiosResponse> => 
+  API.get('/auth/check-first-user'); 

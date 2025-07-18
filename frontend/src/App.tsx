@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage';
 import SettingsPage from './pages/SettingsPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import AdminProfilePage from './pages/AdminProfilePage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 const App: React.FC = () => {
@@ -26,6 +27,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <SettingsPage />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/admin-profile" 
+          element={
+            <ProtectedRoute>
+              <AdminProfilePage />
             </ProtectedRoute>
           } 
         />

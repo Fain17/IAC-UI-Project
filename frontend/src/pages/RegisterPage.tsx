@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { checkFirstUser } from '../api';
 
 const RegisterPage: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -9,6 +11,26 @@ const RegisterPage: React.FC = () => {
     confirmPassword: ''
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [isFirstUser, setIsFirstUser] = useState(false);
+  const [checkingFirstUser, setCheckingFirstUser] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const checkFirstUserStatus = async () => {
+      try {
+        const response = await checkFirstUser();
+        setIsFirstUser(response.data.is_first_user || false);
+      } catch (err) {
+        // If the endpoint doesn't exist, assume not first user
+        setIsFirstUser(false);
+      } finally {
+        setCheckingFirstUser(false);
+      }
+    };
+    
+    checkFirstUserStatus();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -20,25 +42,61 @@ const RegisterPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
+    setError('');
     
     if (formData.password !== formData.confirmPassword) {
-      alert('Passwords do not match');
+      setError('Passwords do not match');
       setIsLoading(false);
       return;
     }
     
-    // TODO: Implement registration logic here
-    console.log('Registration attempt:', formData);
-    
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const response = await axios.post('http://localhost:8000/auth/register', {
+        username: formData.username,
+        email: formData.email,
+        password: formData.password
+      });
+      
+      // Store token and user info from response
+      localStorage.setItem('token', response.data.access_token);
+      localStorage.setItem('userEmail', response.data.user.email);
+      localStorage.setItem('username', response.data.user.username || '');
+      localStorage.setItem('isAdmin', (!!response.data.user.is_admin).toString());
+      
       setIsLoading(false);
-    }, 1000);
+      navigate('/home');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Registration failed');
+      setIsLoading(false);
+    }
   };
+
+  if (checkingFirstUser) {
+    return (
+      <div style={{ maxWidth: 400, margin: '50px auto', background: '#fff', padding: '2rem', borderRadius: 8, boxShadow: '0 0 10px rgba(0,0,0,0.05)' }}>
+        <h1>Register</h1>
+        <div style={{ textAlign: 'center', padding: '2rem' }}>
+          <div>Loading...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: 400, margin: '50px auto', background: '#fff', padding: '2rem', borderRadius: 8, boxShadow: '0 0 10px rgba(0,0,0,0.05)' }}>
       <h1>Register</h1>
+      {isFirstUser && (
+        <div style={{ 
+          background: '#d4edda', 
+          color: '#155724', 
+          padding: '1rem', 
+          borderRadius: '5px', 
+          marginBottom: '1rem',
+          border: '1px solid #c3e6cb'
+        }}>
+          <strong>🎉 Welcome!</strong> You're the first user to register. You'll be automatically granted admin privileges.
+        </div>
+      )}
       <form onSubmit={handleSubmit}>
         <label htmlFor="username">Username</label>
         <input
@@ -83,6 +141,7 @@ const RegisterPage: React.FC = () => {
         <button type="submit" disabled={isLoading}>
           {isLoading ? 'Creating account...' : 'Register'}
         </button>
+        {error && <div style={{ color: 'red', marginTop: '1rem' }}>{error}</div>}
       </form>
       <div style={{ marginTop: '1rem', textAlign: 'center' }}>
         <span>Already have an account? </span>
