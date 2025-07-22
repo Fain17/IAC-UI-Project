@@ -14,6 +14,7 @@ const RegisterPage: React.FC = () => {
   const [error, setError] = useState('');
   const [isFirstUser, setIsFirstUser] = useState(false);
   const [checkingFirstUser, setCheckingFirstUser] = useState(true);
+  const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -43,6 +44,7 @@ const RegisterPage: React.FC = () => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
+    setSuccess(false);
     
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
@@ -56,15 +58,14 @@ const RegisterPage: React.FC = () => {
         email: formData.email,
         password: formData.password
       });
-      
-      // Store token and user info from response
-      localStorage.setItem('token', response.data.access_token);
-      localStorage.setItem('userEmail', response.data.user.email);
-      localStorage.setItem('username', response.data.user.username || '');
-      localStorage.setItem('isAdmin', (!!response.data.user.is_admin).toString());
-      
+       
       setIsLoading(false);
-      navigate('/home');
+      setSuccess(true);
+      setTimeout(() => {
+        setSuccess(false);
+        localStorage.clear();
+        navigate('/login');
+      }, 3000);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Registration failed');
       setIsLoading(false);
@@ -147,6 +148,20 @@ const RegisterPage: React.FC = () => {
         <span>Already have an account? </span>
         <Link to="/login" style={{ color: '#007bff', textDecoration: 'none' }}>Login</Link>
       </div>
+      {success && (
+        <div style={{
+          marginTop: '2rem',
+          background: '#d4edda',
+          color: '#155724',
+          border: '1px solid #c3e6cb',
+          borderRadius: '5px',
+          padding: '1rem',
+          textAlign: 'center',
+          fontWeight: 500
+        }}>
+          Registered successfully! Redirecting to login...
+        </div>
+      )}
     </div>
   );
 };

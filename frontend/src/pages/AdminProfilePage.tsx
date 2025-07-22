@@ -26,6 +26,9 @@ const AdminProfilePage: React.FC = () => {
   const [deleteData, setDeleteData] = useState({ password: '' });
   const [deleteError, setDeleteError] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [usernameError, setUsernameError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -38,6 +41,7 @@ const AdminProfilePage: React.FC = () => {
       email,
       isAdmin
     });
+    setNewUsername(username);
   }, []);
 
   const handlePasswordReset = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -109,6 +113,33 @@ const AdminProfilePage: React.FC = () => {
     navigate('/login');
   };
 
+  const handleUsernameEdit = () => {
+    setEditingUsername(true);
+    setUsernameError('');
+  };
+
+  const handleUsernameSave = async () => {
+    setUsernameError('');
+    if (!newUsername.trim()) {
+      setUsernameError('Username cannot be empty');
+      return;
+    }
+    try {
+      await axios.put('http://localhost:8000/auth/edit-username', {
+        new_username: newUsername
+      }, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      setAdminInfo(info => ({ ...info, username: newUsername }));
+      localStorage.setItem('username', newUsername);
+      setEditingUsername(false);
+    } catch (err: any) {
+      setUsernameError(err.response?.data?.message || 'Failed to update username');
+    }
+  };
+
   return (
     <>
       <button
@@ -146,9 +177,27 @@ const AdminProfilePage: React.FC = () => {
         <div style={{ marginBottom: '2rem' }}>
           <h2>Profile Information</h2>
           <div style={{ background: '#f8f9fa', padding: '1rem', borderRadius: '5px', marginTop: '1rem' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <strong>Username:</strong> {adminInfo.username}
+            <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <strong>Username:</strong>
+              {editingUsername ? (
+                <>
+                  <input
+                    type="text"
+                    value={newUsername}
+                    onChange={e => setNewUsername(e.target.value)}
+                    style={{ padding: '0.3rem 0.5rem', border: '1px solid #ced4da', borderRadius: 4, fontSize: '1rem' }}
+                  />
+                  <button onClick={handleUsernameSave} style={{ marginLeft: 4, background: '#28a745', color: 'white', border: 'none', borderRadius: 4, padding: '0.3rem 0.7rem', cursor: 'pointer' }}>Save</button>
+                  <button onClick={() => { setEditingUsername(false); setNewUsername(adminInfo.username); }} style={{ marginLeft: 4, background: '#6c757d', color: 'white', border: 'none', borderRadius: 4, padding: '0.3rem 0.7rem', cursor: 'pointer' }}>Cancel</button>
+                </>
+              ) : (
+                <>
+                  <span style={{ marginLeft: 8 }}>{adminInfo.username}</span>
+                  <button onClick={handleUsernameEdit} style={{ marginLeft: 8, background: '#007bff', color: 'white', border: 'none', borderRadius: 4, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.95em' }}>Edit</button>
+                </>
+              )}
             </div>
+            {usernameError && <div style={{ color: 'red', marginBottom: '0.5rem' }}>{usernameError}</div>}
             <div style={{ marginBottom: '1rem' }}>
               <strong>Email:</strong> {adminInfo.email}
             </div>
