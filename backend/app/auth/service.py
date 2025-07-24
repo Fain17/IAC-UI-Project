@@ -61,17 +61,27 @@ class AuthService:
         return await UserSessionRepository.delete_by_token(token)
     
     async def register_user(self, username: str, email: str, password: str) -> dict:
-        """Register a new user."""
+        from app.db.database import db_service
+        if not db_service.client:
+            raise RuntimeError("Database client not initialized")
         try:
-            # Hash password and create user
+            # Check if username or email already exists
+            existing = await db_service.client.execute(
+                "SELECT id FROM users WHERE username = ? OR email = ?",
+                [username, email]
+            )
+            if existing.rows:
+                return {"success": False, "error": "Username or email already exists"}
+            # Check if this is the first user
+            result = await db_service.client.execute("SELECT COUNT(*) FROM users")
+            is_first_user = result.rows[0][0] == 0
             hashed_password = self.get_password_hash(password)
-            success = await UserRepository.create(username, email, hashed_password)
-            
+            success = await UserRepository.create(
+                username, email, hashed_password, is_admin = is_first_user
+            )
             if not success:
                 return {"success": False, "error": "Username or email already exists"}
-            
-            return {"success": True, "message": "User registered successfully"}
-        
+            return {"success": True, "message": "User registered successfully", "is_first_user": is_first_user}
         except Exception as e:
             logger.error(f"Error registering user: {e}")
             return {"success": False, "error": "Registration failed"}
@@ -90,7 +100,8 @@ class AuthService:
             return {
                 "id": user["id"],
                 "username": user["username"],
-                "email": user["email"]
+                "email": user["email"],
+                "is_admin": user["is_admin"]
             }
         
         except Exception as e:
@@ -111,7 +122,8 @@ class AuthService:
             return {
                 "id": user["id"],
                 "username": user["username"],
-                "email": user["email"]
+                "email": user["email"],
+                "is_admin": user["is_admin"]
             }
         
         except Exception as e:
@@ -121,6 +133,87 @@ class AuthService:
     async def get_user_by_id(self, user_id: int) -> Optional[dict]:
         """Get user by ID."""
         return await UserRepository.get_by_id(user_id)
+
+    async def change_password(self, user_id: int, current_password: str, new_password: str, confirm_password: str) -> dict:
+        user = await UserRepository.get_by_id(user_id)
+        if not user:
+            return {"success": False, "error": "User not found"}
+        hashed = self.get_password_hash(current_password)
+        if not hashed or not hashed.startswith("$2b$"):
+            return {"success": False, "error": "Password hash is invalid or missing"}
+        if not self.verify_password(current_password, hashed):
+            return {"success": False, "error": "Current password is incorrect"}
+        if new_password != confirm_password:
+            return {"success": False, "error": "New passwords do not match"}
+        hashed = self.get_password_hash(new_password)
+        from app.db.database import db_service
+        if not db_service.client:
+            raise RuntimeError("Database client not initialized")
+        await db_service.client.execute(
+            "UPDATE users SET hashed_password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [hashed, user_id]
+        )
+        return {"success": True, "message": "Password updated successfully"}
+
+    async def delete_user_account(self, user_id: int, password: str) -> dict:
+        from app.db.database import db_service
+        if not db_service.client:
+            raise RuntimeError("Database client not initialized")
+        try:
+            user = await UserRepository.get_by_id(user_id)
+            if not user:
+                return {"success": False, "error": "User not found"}
+            hashed = self.get_password_hash(password)
+            if not hashed or not self.verify_password(password, hashed):
+                return {"success": False, "error": "Password is incorrect"}
+            result = await db_service.client.execute(
+                "DELETE FROM users WHERE id = ?",
+                [user_id]
+            )
+            if result.rows_affected == 0:
+                return {"success": False, "error": "User not found or already deleted"}
+            return {"success": True, "message": "User account deleted successfully"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def edit_username(self, user_id: int, new_username: str) -> dict:
+        from app.db.database import db_service
+        if not db_service.client:
+            raise RuntimeError("Database client not initialized")
+        try:
+            # Check if username is taken
+            result = await db_service.client.execute(
+                "SELECT id FROM users WHERE username = ?",
+                [new_username]
+            )
+            if result.rows:
+                return {"success": False, "error": "Username already taken"}
+            await db_service.client.execute(
+                "UPDATE users SET username = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [new_username, user_id]
+            )
+            return {"success": True, "message": "Username updated successfully"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def hard_reset_password(self, email: str, new_password: str, confirm_password: str) -> dict:
+        from app.db.database import db_service
+        if not db_service.client:
+            raise RuntimeError("Database client not initialized")
+        try:
+            user = await UserRepository.get_by_email(email)
+            if not user:
+                return {"success": False, "error": "User with this email does not exist"}
+            if new_password != confirm_password:
+                return {"success": False, "error": "New passwords do not match"}
+            hashed = self.get_password_hash(new_password)
+            await db_service.client.execute(
+                "UPDATE users SET hashed_password = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ?",
+                [hashed, email]
+            )
+            return {"success": True, "message": "Password reset successfully"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 # Global auth service instance
 auth_service = AuthService() 

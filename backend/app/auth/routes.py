@@ -1,5 +1,5 @@
 import re
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -7,7 +7,7 @@ from app.auth.service import auth_service
 from app.auth.dependencies import get_current_user
 from typing import Optional
 
-router = APIRouter(prefix="/auth", tags=["authentication"])
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 security = HTTPBearer()
 
 class UserRegister(BaseModel):
@@ -23,6 +23,21 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str
     user: dict
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_password: str
+
+class EditUsernameRequest(BaseModel):
+    new_username: str
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+class HardResetPasswordRequest(BaseModel):
+    email: str
+    new_password: str
+    confirm_password: str
 
 def is_email(value: str) -> bool:
     """Check if the input looks like an email address."""
@@ -62,6 +77,21 @@ async def login(user_data: UserLogin):
         token_type="bearer",
         user=user
     )
+    
+@router.post("/change-password", response_model=dict)
+async def change_password(
+    data: ChangePasswordRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    result = await auth_service.change_password(
+        user_id=current_user["id"],
+        current_password=data.current_password,
+        new_password=data.new_password,
+        confirm_password=data.confirm_password
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"message": result["message"]}
 
 @router.get("/me", response_model=dict)
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):
@@ -104,3 +134,69 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not success:
         raise HTTPException(status_code=400, detail="Logout failed or session not found.")
     return {"message": "Logged out successfully."} 
+
+@router.delete("/delete-account", response_model=dict)
+async def delete_account(
+    data: DeleteAccountRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    result = await auth_service.delete_user_account(user_id=current_user["id"], password=data.password)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"message": result["message"]}
+
+@router.put("/edit-username", response_model=dict)
+async def edit_username(
+    data: EditUsernameRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    result = await auth_service.edit_username(user_id=current_user["id"], new_username=data.new_username)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"message": result["message"]} 
+
+@router.post("/hard-reset-password", response_model=dict)
+async def hard_reset_password(data: HardResetPasswordRequest):
+    result = await auth_service.hard_reset_password(
+        email=data.email,
+        new_password=data.new_password,
+        confirm_password=data.confirm_password
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"message": result["message"]}
+
+@router.get("/check-first-user", response_model=dict)
+async def check_first_user():
+    from app.db.database import db_service
+    if not db_service.client:
+        raise HTTPException(status_code=500, detail="Database client not initialized")
+    result = await db_service.client.execute("SELECT COUNT(*) FROM users")
+    is_first_user = result.rows[0][0] == 0
+    return {"is_first_user": is_first_user} 
+
+@router.get("/check-availability", response_model=dict)
+async def check_availability(
+    username: Optional[str] = Query(None),
+    email: Optional[str] = Query(None)
+):
+    from app.db.database import db_service
+    if not db_service.client:
+        raise HTTPException(status_code=500, detail="Database client not initialized")
+    if not username and not email:
+        raise HTTPException(status_code=400, detail="Username or email required")
+    if username:
+        result = await db_service.client.execute(
+            "SELECT id FROM users WHERE username = ?",
+            [username]
+        )
+        if result.rows:
+            return {"available": False, "field": "username"}
+    if email:
+        result = await db_service.client.execute(
+            "SELECT id FROM users WHERE email = ?",
+            [email]
+        )
+        if result.rows:
+            return {"available": False, "field": "email"}
+    return {"available": True} 

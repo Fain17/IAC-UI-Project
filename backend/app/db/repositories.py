@@ -115,7 +115,7 @@ class UserRepository:
             return None
         try:
             result = await db_service.client.execute(
-                "SELECT id, username, email, is_active FROM users WHERE id = ? AND is_active = TRUE",
+                "SELECT id, username, email, is_active, is_admin FROM users WHERE id = ? AND is_active = TRUE",
                 [user_id]
             )
             
@@ -127,7 +127,8 @@ class UserRepository:
                 "id": user[0],
                 "username": user[1],
                 "email": user[2],
-                "is_active": user[3]
+                "is_active": user[3],
+                "is_admin": user[4]
             }
         except Exception as e:
             logger.error(f"Error getting user by ID: {e}")
@@ -140,7 +141,7 @@ class UserRepository:
             return None
         try:
             result = await db_service.client.execute(
-                "SELECT id, username, email, hashed_password, is_active FROM users WHERE username = ? AND is_active = TRUE",
+                "SELECT id, username, email, hashed_password, is_active, is_admin FROM users WHERE username = ? AND is_active = TRUE",
                 [username]
             )
             
@@ -153,7 +154,8 @@ class UserRepository:
                 "username": user[1],
                 "email": user[2],
                 "hashed_password": user[3],
-                "is_active": user[4]
+                "is_active": user[4],
+                "is_admin": user[5]
             }
         except Exception as e:
             logger.error(f"Error getting user by username: {e}")
@@ -166,7 +168,7 @@ class UserRepository:
             return None
         try:
             result = await db_service.client.execute(
-                "SELECT id, username, email, hashed_password, is_active FROM users WHERE email = ? AND is_active = TRUE",
+                "SELECT id, username, email, hashed_password, is_active, is_admin FROM users WHERE email = ? AND is_active = TRUE",
                 [email]
             )
             
@@ -179,14 +181,15 @@ class UserRepository:
                 "username": user[1],
                 "email": user[2],
                 "hashed_password": user[3],
-                "is_active": user[4]
+                "is_active": user[4],
+                "is_admin": user[5]
             }
         except Exception as e:
             logger.error(f"Error getting user by email: {e}")
             return None
     
     @staticmethod
-    async def create(username: str, email: str, hashed_password: str) -> bool:
+    async def create(username: str, email: str, hashed_password: str, is_admin: bool = False) -> bool:
         """Create a new user."""
         if not db_service.client:
             return False
@@ -202,8 +205,8 @@ class UserRepository:
             
             # Create new user
             await db_service.client.execute(
-                "INSERT INTO users (username, email, hashed_password) VALUES (?, ?, ?)",
-                [username, email, hashed_password]
+                "INSERT INTO users (username, email, hashed_password, is_admin) VALUES (?, ?, ?, ?)",
+                [username, email, hashed_password, is_admin]
             )
             return True
         except Exception as e:

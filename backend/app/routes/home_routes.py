@@ -5,19 +5,12 @@ from app.auth.dependencies import get_current_user
 
 router = APIRouter()
 
+@router.get("/health", tags=["Home"])
+async def health_check(current_user: dict = Depends(get_current_user)):
+    return JSONResponse(status_code=200, content={"status": "healthy", "service": "iac-ui-agent"})
 
-@router.get("/health")
-async def health_check():
-    """Health check endpoint for Docker and load balancers."""
-    return JSONResponse(
-        status_code=200,
-        content={"status": "healthy", "service": "iac-ui-agent"}
-    )
-
-
-@router.get("/", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse, tags=["Home"])
 async def form(current_user: dict = Depends(get_current_user)):
-    """Main form page for creating AMI and updating launch template."""
     return f"""
         <h2>Welcome, {current_user['username']}!</h2>
         <form action="/run" method="post">
@@ -28,12 +21,9 @@ async def form(current_user: dict = Depends(get_current_user)):
         <p><a href="/auth/logout">Logout</a></p>
     """
 
-
-@router.post("/run", response_class=HTMLResponse)
+@router.post("/run", response_class=HTMLResponse, tags=["Home"])
 async def run(server: str = Form(...), lt: str = Form(...), current_user: dict = Depends(get_current_user)):
-    """Handle form submission for AMI creation and launch template update."""
     result = update_launch_template_from_instance_tag(server, lt)
-    
     if result["success"]:
         return f"""
         ✅ Success!<br>
