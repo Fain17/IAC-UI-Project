@@ -15,7 +15,17 @@ const RegisterPage: React.FC = () => {
   const [isFirstUser, setIsFirstUser] = useState(false);
   const [checkingFirstUser, setCheckingFirstUser] = useState(true);
   const [success, setSuccess] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [emailAvailable, setEmailAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [checkingEmail, setCheckingEmail] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (localStorage.getItem('token')) {
+      navigate('/home', { replace: true });
+    }
+  }, [navigate]);
 
   useEffect(() => {
     const checkFirstUserStatus = async () => {
@@ -23,15 +33,57 @@ const RegisterPage: React.FC = () => {
         const response = await checkFirstUser();
         setIsFirstUser(response.data.is_first_user || false);
       } catch (err) {
-        // If the endpoint doesn't exist, assume not first user
         setIsFirstUser(false);
       } finally {
         setCheckingFirstUser(false);
       }
     };
-    
     checkFirstUserStatus();
   }, []);
+
+  // Username availability check
+  useEffect(() => {
+    if (!formData.username) {
+      setUsernameAvailable(null);
+      return;
+    }
+    setCheckingUsername(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const res = await axios.get('http://localhost:8000/auth/check-availability', {
+          params: { username: formData.username }
+        });
+        setUsernameAvailable(res.data.available);
+      } catch {
+        setUsernameAvailable(null);
+      } finally {
+        setCheckingUsername(false);
+      }
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [formData.username]);
+
+  // Email availability check
+  useEffect(() => {
+    if (!formData.email) {
+      setEmailAvailable(null);
+      return;
+    }
+    setCheckingEmail(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const res = await axios.get('http://localhost:8000/auth/check-availability', {
+          params: { email: formData.email }
+        });
+        setEmailAvailable(res.data.available);
+      } catch {
+        setEmailAvailable(null);
+      } finally {
+        setCheckingEmail(false);
+      }
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [formData.email]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -51,14 +103,22 @@ const RegisterPage: React.FC = () => {
       setIsLoading(false);
       return;
     }
-    
+    if (usernameAvailable === false) {
+      setError('Username is already taken');
+      setIsLoading(false);
+      return;
+    }
+    if (emailAvailable === false) {
+      setError('Email is already taken');
+      setIsLoading(false);
+      return;
+    }
     try {
       const response = await axios.post('http://localhost:8000/auth/register', {
         username: formData.username,
         email: formData.email,
         password: formData.password
       });
-       
       setIsLoading(false);
       setSuccess(true);
       setTimeout(() => {
@@ -109,6 +169,10 @@ const RegisterPage: React.FC = () => {
           placeholder="Enter your username"
           required
         />
+        {checkingUsername && <span style={{ color: '#888', fontSize: '0.95em' }}>Checking...</span>}
+        {usernameAvailable === false && <span style={{ color: 'red', fontSize: '0.95em' }}>Username is taken</span>}
+        {usernameAvailable === true && <span style={{ color: 'green', fontSize: '0.95em' }}>Username is available</span>}
+
         <label htmlFor="email">Email</label>
         <input
           id="email"
@@ -119,6 +183,10 @@ const RegisterPage: React.FC = () => {
           placeholder="Enter your email"
           required
         />
+        {checkingEmail && <span style={{ color: '#888', fontSize: '0.95em' }}>Checking...</span>}
+        {emailAvailable === false && <span style={{ color: 'red', fontSize: '0.95em' }}>Email is taken</span>}
+        {emailAvailable === true && <span style={{ color: 'green', fontSize: '0.95em' }}>Email is available</span>}
+
         <label htmlFor="password">Password</label>
         <input
           id="password"
