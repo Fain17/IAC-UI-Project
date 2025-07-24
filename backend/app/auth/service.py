@@ -65,9 +65,15 @@ class AuthService:
         if not db_service.client:
             raise RuntimeError("Database client not initialized")
         try:
+            # Check if username or email already exists
+            existing = await db_service.client.execute(
+                "SELECT id FROM users WHERE username = ? OR email = ?",
+                [username, email]
+            )
+            if existing.rows:
+                return {"success": False, "error": "Username or email already exists"}
             # Check if this is the first user
             result = await db_service.client.execute("SELECT COUNT(*) FROM users")
-            print(result)
             is_first_user = result.rows[0][0] == 0
             hashed_password = self.get_password_hash(password)
             success = await UserRepository.create(
@@ -187,6 +193,25 @@ class AuthService:
                 [new_username, user_id]
             )
             return {"success": True, "message": "Username updated successfully"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def hard_reset_password(self, email: str, new_password: str, confirm_password: str) -> dict:
+        from app.db.database import db_service
+        if not db_service.client:
+            raise RuntimeError("Database client not initialized")
+        try:
+            user = await UserRepository.get_by_email(email)
+            if not user:
+                return {"success": False, "error": "User with this email does not exist"}
+            if new_password != confirm_password:
+                return {"success": False, "error": "New passwords do not match"}
+            hashed = self.get_password_hash(new_password)
+            await db_service.client.execute(
+                "UPDATE users SET hashed_password = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ?",
+                [hashed, email]
+            )
+            return {"success": True, "message": "Password reset successfully"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 

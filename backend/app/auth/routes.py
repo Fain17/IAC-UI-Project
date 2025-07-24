@@ -1,5 +1,5 @@
 import re
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -7,7 +7,7 @@ from app.auth.service import auth_service
 from app.auth.dependencies import get_current_user
 from typing import Optional
 
-router = APIRouter(prefix="/auth", tags=["authentication"])
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 security = HTTPBearer()
 
 class UserRegister(BaseModel):
@@ -33,6 +33,11 @@ class EditUsernameRequest(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     password: str
+
+class HardResetPasswordRequest(BaseModel):
+    email: str
+    new_password: str
+    confirm_password: str
 
 def is_email(value: str) -> bool:
     """Check if the input looks like an email address."""
@@ -150,6 +155,17 @@ async def edit_username(
         raise HTTPException(status_code=400, detail=result["error"])
     return {"message": result["message"]} 
 
+@router.post("/hard-reset-password", response_model=dict)
+async def hard_reset_password(data: HardResetPasswordRequest):
+    result = await auth_service.hard_reset_password(
+        email=data.email,
+        new_password=data.new_password,
+        confirm_password=data.confirm_password
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"message": result["message"]}
+
 @router.get("/check-first-user", response_model=dict)
 async def check_first_user():
     from app.db.database import db_service
@@ -158,3 +174,29 @@ async def check_first_user():
     result = await db_service.client.execute("SELECT COUNT(*) FROM users")
     is_first_user = result.rows[0][0] == 0
     return {"is_first_user": is_first_user} 
+
+@router.get("/check-availability", response_model=dict)
+async def check_availability(
+    username: Optional[str] = Query(None),
+    email: Optional[str] = Query(None)
+):
+    from app.db.database import db_service
+    if not db_service.client:
+        raise HTTPException(status_code=500, detail="Database client not initialized")
+    if not username and not email:
+        raise HTTPException(status_code=400, detail="Username or email required")
+    if username:
+        result = await db_service.client.execute(
+            "SELECT id FROM users WHERE username = ?",
+            [username]
+        )
+        if result.rows:
+            return {"available": False, "field": "username"}
+    if email:
+        result = await db_service.client.execute(
+            "SELECT id FROM users WHERE email = ?",
+            [email]
+        )
+        if result.rows:
+            return {"available": False, "field": "email"}
+    return {"available": True} 
