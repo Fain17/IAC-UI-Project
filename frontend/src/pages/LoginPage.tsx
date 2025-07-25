@@ -75,6 +75,9 @@ const LoginPage: React.FC = () => {
         <span>Don't have an account? </span>
         <Link to="/register" style={{ color: '#007bff', textDecoration: 'none' }}>Register</Link>
       </div>
+      <div style={{ marginTop: '0.5rem', textAlign: 'center' }}>
+        <Link to="/forgot-password" style={{ color: '#007bff', textDecoration: 'none' }}>Forgot Password?</Link>
+      </div>
     </div>
   );
 };
