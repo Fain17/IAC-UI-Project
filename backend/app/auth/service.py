@@ -196,20 +196,62 @@ class AuthService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def hard_reset_password(self, email: str, new_password: str, confirm_password: str) -> dict:
+    async def request_password_reset(self, email: str) -> dict:
         from app.db.database import db_service
+        import secrets
         if not db_service.client:
             raise RuntimeError("Database client not initialized")
         try:
             user = await UserRepository.get_by_email(email)
             if not user:
                 return {"success": False, "error": "User with this email does not exist"}
+            # Generate token
+            token = secrets.token_urlsafe(32)
+            await db_service.client.execute(
+                "CREATE TABLE IF NOT EXISTS password_reset_tokens (email TEXT, token TEXT, expires_at TIMESTAMP)"
+            )
+            from datetime import datetime, timedelta, timezone
+            expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            await db_service.client.execute(
+                "INSERT INTO password_reset_tokens (email, token, expires_at) VALUES (?, ?, ?)",
+                [email, token, expires_at]
+            )
+            # Print the reset link (replace with email in production)
+            print(f"Password reset link: http://localhost:3000/reset-password?token={token}")
+            return {"success": True, "message": "Password reset link sent to email (printed in console for now)."}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def hard_reset_password(self, token: str, new_password: str, confirm_password: str) -> dict:
+        from app.db.database import db_service
+        from datetime import datetime, timezone
+        if not db_service.client:
+            raise RuntimeError("Database client not initialized")
+        try:
+            # Find token
+            await db_service.client.execute(
+                "CREATE TABLE IF NOT EXISTS password_reset_tokens (email TEXT, token TEXT, expires_at TIMESTAMP)"
+            )
+            result = await db_service.client.execute(
+                "SELECT email, expires_at FROM password_reset_tokens WHERE token = ?",
+                [token]
+            )
+            if not result.rows:
+                return {"success": False, "error": "Invalid or expired token"}
+            email, expires_at = result.rows[0]
+            if datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
+                return {"success": False, "error": "Token has expired"}
             if new_password != confirm_password:
                 return {"success": False, "error": "New passwords do not match"}
             hashed = self.get_password_hash(new_password)
             await db_service.client.execute(
                 "UPDATE users SET hashed_password = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ?",
                 [hashed, email]
+            )
+            # Delete the token after use
+            await db_service.client.execute(
+                "DELETE FROM password_reset_tokens WHERE token = ?",
+                [token]
             )
             return {"success": True, "message": "Password reset successfully"}
         except Exception as e:

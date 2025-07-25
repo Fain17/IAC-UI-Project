@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.auth.service import auth_service
 from app.auth.dependencies import get_current_user
 from typing import Optional
+import secrets
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 security = HTTPBearer()
@@ -34,8 +35,11 @@ class EditUsernameRequest(BaseModel):
 class DeleteAccountRequest(BaseModel):
     password: str
 
-class HardResetPasswordRequest(BaseModel):
+class RequestPasswordReset(BaseModel):
     email: str
+
+class HardResetPasswordRequest(BaseModel):
+    token: str
     new_password: str
     confirm_password: str
 
@@ -155,10 +159,17 @@ async def edit_username(
         raise HTTPException(status_code=400, detail=result["error"])
     return {"message": result["message"]} 
 
+@router.post("/request-password-reset", response_model=dict)
+async def request_password_reset(data: RequestPasswordReset):
+    result = await auth_service.request_password_reset(email=data.email)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"message": result["message"]}
+
 @router.post("/hard-reset-password", response_model=dict)
 async def hard_reset_password(data: HardResetPasswordRequest):
     result = await auth_service.hard_reset_password(
-        email=data.email,
+        token=data.token,
         new_password=data.new_password,
         confirm_password=data.confirm_password
     )
