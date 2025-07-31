@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 from app.db.repositories import UserRepository, UserSessionRepository
 import logging
 
@@ -16,6 +16,7 @@ class AuthService:
         self.secret_key = SECRET_KEY
         self.algorithm = ALGORITHM
         self.access_token_expire_minutes = ACCESS_TOKEN_EXPIRE_MINUTES
+        self.refresh_token_expire_days = REFRESH_TOKEN_EXPIRE_DAYS
     
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash."""
@@ -25,7 +26,7 @@ class AuthService:
         """Hash a password."""
         return pwd_context.hash(password)
     
-    def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    async def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """Create a JWT access token and store session."""
         to_encode = data.copy()
         if expires_delta:
@@ -38,20 +39,195 @@ class AuthService:
         # Store session in DB
         user_id = data.get("sub")
         if user_id:
-            # Store session with expiry
-            from app.db.repositories import UserSessionRepository
-            import asyncio
-            asyncio.create_task(UserSessionRepository.create(int(user_id), encoded_jwt, expire))
+            # Store session with expiry in ISO format
+            try:
+                # Convert to ISO format for consistent storage
+                expire_iso = expire.isoformat()
+                success = await UserSessionRepository.create(int(user_id), encoded_jwt, expire_iso)
+                if success:
+                    logger.info(f"Session created successfully for user {user_id}, expires at {expire_iso}")
+                else:
+                    logger.error(f"Failed to create session for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error creating session: {e}")
         return encoded_jwt
+
+    async def create_refresh_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+        """Create a JWT refresh token and store in database."""
+        to_encode = data.copy()
+        if expires_delta:
+            expire = datetime.now(timezone.utc) + expires_delta
+        else:
+            # Refresh tokens last configurable days by default
+            # For testing: convert days to minutes if less than 1 day
+            if self.refresh_token_expire_days < 1:
+                # Convert to minutes for short durations
+                minutes = int(self.refresh_token_expire_days * 24 * 60)
+                expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+            else:
+                expire = datetime.now(timezone.utc) + timedelta(days=self.refresh_token_expire_days)
+        
+        to_encode.update({"exp": expire, "type": "refresh"})  # Add type to distinguish from access tokens
+        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+        
+        # Store refresh token in database
+        user_id = data.get("sub")
+        if user_id:
+            from app.db.repositories import RefreshTokenRepository
+            try:
+                expire_iso = expire.isoformat()
+                success = await RefreshTokenRepository.create(int(user_id), encoded_jwt, expire_iso)
+                if success:
+                    logger.info(f"Refresh token created successfully for user {user_id}, expires at {expire_iso}")
+                else:
+                    logger.error(f"Failed to create refresh token for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error creating refresh token: {e}")
+        
+        return encoded_jwt
+
+    async def verify_refresh_token(self, refresh_token: str) -> Optional[dict]:
+        """Verify and decode a refresh token, check database validity."""
+        try:
+            # Decode JWT token
+            payload = jwt.decode(refresh_token, self.secret_key, algorithms=[self.algorithm])
+            
+            # Check if it's actually a refresh token
+            if payload.get("type") != "refresh":
+                logger.warning("Token is not a refresh token")
+                return None
+            
+            # Check database for token validity
+            from app.db.repositories import RefreshTokenRepository
+            token_info = await RefreshTokenRepository.get_by_token(refresh_token)
+            
+            if not token_info:
+                logger.warning("Refresh token not found in database")
+                return None
+            
+            # Check if token is revoked
+            if token_info["is_revoked"]:
+                logger.warning("Refresh token is revoked")
+                return None
+            
+            # Check expiration
+            expires_at_str = token_info["expires_at"]
+            current_time = datetime.now(timezone.utc)
+            
+            try:
+                if isinstance(expires_at_str, str):
+                    if 'T' in expires_at_str:
+                        expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                    else:
+                        expires_at = datetime.strptime(expires_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                elif isinstance(expires_at_str, (int, float)):
+                    # Handle timestamp as Unix timestamp
+                    expires_at = datetime.fromtimestamp(expires_at_str, tz=timezone.utc)
+                elif isinstance(expires_at_str, datetime):
+                    # Already a datetime object
+                    expires_at = expires_at_str
+                else:
+                    logger.error(f"Unknown refresh token expires_at type: {type(expires_at_str)}")
+                    return None
+                
+                if current_time > expires_at:
+                    logger.warning("Refresh token has expired")
+                    # Clean up expired token
+                    await RefreshTokenRepository.delete_by_token(refresh_token)
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"Error parsing refresh token expiration: {e}")
+                return None
+            
+            return payload
+            
+        except JWTError as e:
+            logger.warning(f"Invalid refresh token JWT: {e}")
+            return None
+
+    async def refresh_access_token(self, refresh_token: str) -> Optional[dict]:
+        """Use refresh token to get new access token (keep same refresh token)."""
+        # Verify refresh token
+        payload = await self.verify_refresh_token(refresh_token)
+        if not payload:
+            return None
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        
+        # Get user info
+        user = await self.get_user_by_id(int(user_id))
+        if not user:
+            return None
+        
+        # Create new access token (short-lived)
+        new_access_token = await self.create_access_token(
+            data={"sub": str(user_id)},
+            expires_delta=timedelta(minutes=self.access_token_expire_minutes)
+        )
+        
+        # Keep the same refresh token (no token rotation)
+        # This allows the same refresh token to be used multiple times
+        # until it expires naturally
+        
+        return {
+            "access_token": new_access_token,
+            "refresh_token": refresh_token,  # Return the same refresh token
+            "token_type": "bearer",
+            "user": user
+        }
     
     async def verify_token(self, token: str) -> Optional[dict]:
         """Verify and decode a JWT token, and check session table."""
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-            # Check session table
-            exists = await UserSessionRepository.exists(token)
-            if not exists:
+            # Check session table for token existence and expiration
+            from app.db.database import db_service
+            if not db_service.client:
                 return None
+            
+            result = await db_service.client.execute(
+                "SELECT expires_at FROM user_sessions WHERE session_token = ?",
+                [token]
+            )
+            
+            if not result.rows:
+                return None
+            
+            expires_at_str = result.rows[0][0]
+            current_time = datetime.now(timezone.utc)
+            
+            # Parse the expiration timestamp
+            try:
+                if isinstance(expires_at_str, str):
+                    if 'T' in expires_at_str:
+                        # ISO format
+                        expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                    else:
+                        # SQLite format: "2025-07-29 11:53:59"
+                        expires_at = datetime.strptime(expires_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                elif isinstance(expires_at_str, (int, float)):
+                    # Handle timestamp as Unix timestamp
+                    expires_at = datetime.fromtimestamp(expires_at_str, tz=timezone.utc)
+                elif isinstance(expires_at_str, datetime):
+                    # Already a datetime object
+                    expires_at = expires_at_str
+                else:
+                    logger.error(f"Unknown expires_at type: {type(expires_at_str)}")
+                    return None
+                
+                if current_time > expires_at:
+                    # Session expired, clean it up immediately
+                    logger.info(f"Session expired, cleaning up token: {token[:20]}...")
+                    await UserSessionRepository.delete_by_token(token)
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"Error parsing session expiration: {e}")
+                return None
+                
             return payload
         except JWTError:
             return None
@@ -256,6 +432,296 @@ class AuthService:
             return {"success": True, "message": "Password reset successfully"}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def cleanup_expired_sessions(self) -> int:
+        """Clean up expired sessions from the database. Returns number of sessions cleaned."""
+        from app.db.database import db_service
+        if not db_service.client:
+            return 0
+        try:
+            current_time = datetime.now(timezone.utc)
+            cleaned_count = 0
+            kept_count = 0
+            
+            logger.info(f"Starting cleanup at {current_time}")
+            
+            # Get all sessions and check expiration manually
+            result = await db_service.client.execute("SELECT id, session_token, expires_at FROM user_sessions")
+            
+            logger.info(f"Found {len(result.rows)} total sessions to check")
+            
+            for row in result.rows:
+                session_id, session_token, expires_at_str = row
+                try:
+                    # Parse the expiration timestamp
+                    if isinstance(expires_at_str, str):
+                        if 'T' in expires_at_str:
+                            # ISO format
+                            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                        else:
+                            # SQLite format: "2025-07-29 11:53:59"
+                            expires_at = datetime.strptime(expires_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    elif isinstance(expires_at_str, (int, float)):
+                        # Handle timestamp as Unix timestamp
+                        expires_at = datetime.fromtimestamp(expires_at_str, tz=timezone.utc)
+                    elif isinstance(expires_at_str, datetime):
+                        # Already a datetime object
+                        expires_at = expires_at_str
+                    else:
+                        logger.error(f"Unknown expires_at type for session {session_id}: {type(expires_at_str)}")
+                        continue
+                    
+                    # Safety check: Only delete if session is actually expired
+                    if current_time > expires_at:
+                        # Session expired, delete it
+                        logger.info(f"Deleting expired session {session_id}, expired at {expires_at}")
+                        await db_service.client.execute(
+                            "DELETE FROM user_sessions WHERE id = ?",
+                            [session_id]
+                        )
+                        cleaned_count += 1
+                    else:
+                        # Session is still active, keep it
+                        time_remaining = (expires_at - current_time).total_seconds()
+                        logger.info(f"Keeping active session {session_id}, expires in {int(time_remaining)} seconds")
+                        kept_count += 1
+                        
+                except Exception as e:
+                    logger.error(f"Error parsing session expiration for session {session_id}: {e}")
+                    # Don't delete sessions we can't parse - keep them for safety
+            
+            logger.info(f"Cleanup complete: Deleted {cleaned_count} expired sessions, kept {kept_count} active sessions")
+            return cleaned_count
+        except Exception as e:
+            logger.error(f"Error cleaning up expired sessions: {e}")
+            return 0
+
+    async def get_active_sessions_count(self) -> int:
+        """Get count of active sessions."""
+        from app.db.database import db_service
+        if not db_service.client:
+            logger.warning("Database client not initialized")
+            return 0
+        try:
+            current_time = datetime.now(timezone.utc)
+            logger.info(f"Checking active sessions at {current_time}")
+            
+            # Get all sessions and check expiration manually
+            result = await db_service.client.execute("SELECT user_id, expires_at FROM user_sessions")
+            
+            active_count = 0
+            for row in result.rows:
+                user_id, expires_at_str = row
+                try:
+                    # Parse the database timestamp
+                    if isinstance(expires_at_str, str):
+                        # Handle different timestamp formats
+                        if 'T' in expires_at_str:
+                            # ISO format
+                            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                        else:
+                            # SQLite format: "2025-07-29 11:53:59"
+                            expires_at = datetime.strptime(expires_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    elif isinstance(expires_at_str, (int, float)):
+                        # Handle timestamp as Unix timestamp
+                        expires_at = datetime.fromtimestamp(expires_at_str, tz=timezone.utc)
+                    elif isinstance(expires_at_str, datetime):
+                        # Already a datetime object
+                        expires_at = expires_at_str
+                    else:
+                        logger.error(f"Unknown expires_at type for user {user_id}: {type(expires_at_str)}")
+                        continue
+                    
+                    if current_time < expires_at:
+                        active_count += 1
+                        logger.info(f"Active session for user {user_id}, expires at {expires_at}")
+                    else:
+                        logger.info(f"Expired session for user {user_id}, expired at {expires_at}")
+                        
+                except Exception as e:
+                    logger.error(f"Error parsing session expiration for user {user_id}: {e}")
+            
+            logger.info(f"Found {active_count} active sessions out of {len(result.rows)} total")
+            return active_count
+        except Exception as e:
+            logger.error(f"Error getting active sessions count: {e}")
+            return 0
+
+    async def run_periodic_cleanup(self):
+        """Run periodic cleanup of expired sessions and refresh tokens."""
+        try:
+            logger.info("Running periodic session cleanup...")
+            cleaned_count = await self.cleanup_expired_sessions()
+            
+            # Also cleanup expired refresh tokens
+            from app.db.repositories import RefreshTokenRepository
+            refresh_cleaned = await RefreshTokenRepository.cleanup_expired()
+            
+            if cleaned_count > 0 or refresh_cleaned > 0:
+                logger.info(f"Periodic cleanup: Removed {cleaned_count} expired sessions, {refresh_cleaned} expired refresh tokens")
+            else:
+                logger.info("Periodic cleanup: No expired tokens found to remove")
+                
+        except Exception as e:
+            logger.error(f"Error in periodic cleanup: {e}")
+
+    async def get_session_info_for_token(self, token: str) -> Optional[dict]:
+        """Get session information for a specific token."""
+        from app.db.database import db_service
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT user_id, expires_at FROM user_sessions WHERE session_token = ?",
+                [token]
+            )
+            
+            if not result.rows:
+                return None
+            
+            user_id, expires_at_str = result.rows[0]
+            current_time = datetime.now(timezone.utc)
+            
+            # Parse expiration timestamp
+            if isinstance(expires_at_str, str):
+                if 'T' in expires_at_str:
+                    expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                else:
+                    expires_at = datetime.strptime(expires_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            elif isinstance(expires_at_str, (int, float)):
+                # Handle timestamp as Unix timestamp
+                expires_at = datetime.fromtimestamp(expires_at_str, tz=timezone.utc)
+            elif isinstance(expires_at_str, datetime):
+                # Already a datetime object
+                expires_at = expires_at_str
+            else:
+                logger.error(f"Unknown expires_at type: {type(expires_at_str)}")
+                return None
+            
+            time_remaining = (expires_at - current_time).total_seconds()
+            
+            return {
+                "user_id": user_id,
+                "expires_at": str(expires_at_str),  # Convert to string for display
+                "time_remaining_seconds": max(0, int(time_remaining)),
+                "is_expired": time_remaining <= 0
+            }
+        except Exception as e:
+            logger.error(f"Error getting session info: {e}")
+            return None
+
+    async def get_all_sessions_info(self) -> dict:
+        """Get information about all sessions for debugging."""
+        from app.db.database import db_service
+        if not db_service.client:
+            return {"error": "Database client not initialized"}
+        
+        try:
+            current_time = datetime.now(timezone.utc)
+            result = await db_service.client.execute("SELECT id, user_id, session_token, expires_at FROM user_sessions")
+            
+            sessions = []
+            active_count = 0
+            expired_count = 0
+            
+            for row in result.rows:
+                session_id, user_id, session_token, expires_at_str = row
+                try:
+                    # Parse expiration timestamp - handle all possible data types
+                    if isinstance(expires_at_str, str):
+                        if 'T' in expires_at_str:
+                            # ISO format
+                            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                        else:
+                            # SQLite format: "2025-07-29 11:53:59"
+                            expires_at = datetime.strptime(expires_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    elif isinstance(expires_at_str, (int, float)):
+                        # Handle timestamp as Unix timestamp
+                        expires_at = datetime.fromtimestamp(expires_at_str, tz=timezone.utc)
+                    elif isinstance(expires_at_str, datetime):
+                        # Already a datetime object
+                        expires_at = expires_at_str
+                    else:
+                        # Unknown type, skip this session
+                        logger.warning(f"Unknown expires_at type for session {session_id}: {type(expires_at_str)}")
+                        sessions.append({
+                            "session_id": session_id,
+                            "user_id": user_id,
+                            "error": f"Unknown expires_at type: {type(expires_at_str)}",
+                            "status": "error"
+                        })
+                        continue
+                    
+                    time_remaining = (expires_at - current_time).total_seconds()
+                    is_expired = time_remaining <= 0
+                    
+                    if is_expired:
+                        expired_count += 1
+                    else:
+                        active_count += 1
+                    
+                    sessions.append({
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "token_preview": session_token[:20] + "..." if len(session_token) > 20 else session_token,
+                        "expires_at": str(expires_at_str),  # Convert to string for display
+                        "time_remaining_seconds": max(0, int(time_remaining)),
+                        "is_expired": is_expired,
+                        "status": "expired" if is_expired else "active"
+                    })
+                    
+                except Exception as e:
+                    sessions.append({
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "error": f"Error parsing expiration: {e}",
+                        "status": "error"
+                    })
+            
+            return {
+                "current_time": current_time.isoformat(),
+                "total_sessions": len(sessions),
+                "active_sessions": active_count,
+                "expired_sessions": expired_count,
+                "sessions": sessions
+            }
+            
+        except Exception as e:
+            return {"error": f"Error getting sessions info: {e}"}
+
+    async def login_user(self, user_data: dict) -> dict:
+        """Login user and return both access and refresh tokens."""
+        # Create short-lived access token (15 minutes)
+        access_token = await self.create_access_token(
+            data={"sub": str(user_data["id"])},
+            expires_delta=timedelta(minutes=self.access_token_expire_minutes)
+        )
+        
+        # Create long-lived refresh token (configurable - 5 minutes for testing)
+        if self.refresh_token_expire_days < 1:
+            # Convert to minutes for short durations
+            minutes = int(self.refresh_token_expire_days * 24 * 60)
+            refresh_token = await self.create_refresh_token(
+                data={"sub": str(user_data["id"])},
+                expires_delta=timedelta(minutes=minutes)
+            )
+        else:
+            refresh_token = await self.create_refresh_token(
+                data={"sub": str(user_data["id"])},
+                expires_delta=timedelta(days=self.refresh_token_expire_days)
+            )
+        
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user": user_data
+        }
+
+    async def revoke_all_refresh_tokens(self, user_id: int) -> bool:
+        """Revoke all refresh tokens for a user (useful for logout all devices)."""
+        from app.db.repositories import RefreshTokenRepository
+        return await RefreshTokenRepository.revoke_all_for_user(user_id)
 
 # Global auth service instance
 auth_service = AuthService() 

@@ -1,7 +1,10 @@
-from fastapi import HTTPException, Depends
+from fastapi import HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.auth.service import auth_service
 from typing import Optional
+from jose import jwt, JWTError, ExpiredSignatureError
+from app.config import SECRET_KEY, ALGORITHM
+from app.db.repositories import UserRepository
 
 security = HTTPBearer()
 
@@ -34,3 +37,20 @@ async def get_current_admin_user(current_user: dict = Depends(get_current_user))
     if not current_user.get("is_admin", False):
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user 
+
+async def get_user_from_token_allow_expired(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid Authorization header")
+    token = auth_header.split(" ")[1]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+        user = await UserRepository.get_by_id(int(user_id))
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        return user
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") 
