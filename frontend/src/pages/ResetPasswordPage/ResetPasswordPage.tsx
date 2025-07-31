@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import './ResetPasswordPage.css';
 
 const ResetPasswordPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -42,32 +43,36 @@ const ResetPasswordPage: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth: 400, margin: '50px auto', background: '#fff', padding: '2rem', borderRadius: 8, boxShadow: '0 0 10px rgba(0,0,0,0.05)' }}>
+    <div className="reset-password-container">
       <h1>Reset Password</h1>
-      <form onSubmit={handleSubmit}>
-        <label htmlFor="password">New Password</label>
-        <input
-          id="password"
-          type="password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          placeholder="Enter new password"
-          required
-        />
-        <label htmlFor="confirmPassword">Confirm New Password</label>
-        <input
-          id="confirmPassword"
-          type="password"
-          value={confirmPassword}
-          onChange={e => setConfirmPassword(e.target.value)}
-          placeholder="Confirm new password"
-          required
-        />
-        <button type="submit" disabled={isLoading} style={{ marginTop: 16 }}>
+      <form onSubmit={handleSubmit} className="reset-password-form">
+        <div className="form-group">
+          <label htmlFor="password">New Password</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Enter new password"
+            required
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="confirmPassword">Confirm New Password</label>
+          <input
+            id="confirmPassword"
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            placeholder="Confirm new password"
+            required
+          />
+        </div>
+        <button type="submit" disabled={isLoading} className="submit-button">
           {isLoading ? 'Resetting...' : 'Reset Password'}
         </button>
-        {error && <div style={{ color: 'red', marginTop: '1rem' }}>{error}</div>}
-        {message && <div style={{ color: 'green', marginTop: '1rem' }}>{message}</div>}
+        {error && <div className="message error-message">{error}</div>}
+        {message && <div className="message success-message">{message}</div>}
       </form>
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import './ForgotPasswordPage.css';
 
 const ForgotPasswordPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -33,23 +34,25 @@ const ForgotPasswordPage: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth: 400, margin: '50px auto', background: '#fff', padding: '2rem', borderRadius: 8, boxShadow: '0 0 10px rgba(0,0,0,0.05)' }}>
+    <div className="forgot-password-container">
       <h1>Forgot Password</h1>
-      <form onSubmit={handleSubmit}>
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          type="email"
-          value={email}
-          onChange={e => { setEmail(e.target.value); setError(''); setMessage(''); }}
-          placeholder="Enter your email"
-          required
-        />
-        <button type="submit" disabled={isLoading || !email} style={{ display: 'block', marginTop: 16 }}>
+      <form onSubmit={handleSubmit} className="forgot-password-form">
+        <div className="form-group">
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            value={email}
+            onChange={e => { setEmail(e.target.value); setError(''); setMessage(''); }}
+            placeholder="Enter your email"
+            required
+          />
+        </div>
+        <button type="submit" disabled={isLoading || !email} className="submit-button">
           {isLoading ? 'Sending...' : 'Send Reset Link'}
         </button>
-        {error && <div style={{ color: 'red', marginTop: '1rem' }}>{error}</div>}
-        {message && <div style={{ color: 'green', marginTop: '1rem' }}>{message}</div>}
+        {error && <div className="message error-message">{error}</div>}
+        {message && <div className="message success-message">{message}</div>}
       </form>
     </div>
   );

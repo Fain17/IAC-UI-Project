@@ -1,0 +1,123 @@
+/* RegisterPage Styles */
+.register-container {
+  max-width: 400px;
+  margin: 50px auto;
+  background: #fff;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.05);
+}
+
+.register-container h1 {
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+
+.register-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+}
+
+.submit-button {
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  margin-top: 1rem;
+}
+
+.submit-button:hover {
+  background: #0056b3;
+}
+
+.submit-button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+.error-message {
+  color: red;
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.success-message {
+  color: green;
+  margin-top: 1rem;
+  text-align: center;
+  font-weight: 500;
+}
+
+.links-container {
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.links-container span {
+  color: #666;
+}
+
+.link {
+  color: #007bff;
+  text-decoration: none;
+  margin-left: 0.5rem;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.first-user-banner {
+  background: #d4edda;
+  color: #155724;
+  padding: 1rem;
+  border-radius: 5px;
+  margin-bottom: 1rem;
+  border: 1px solid #c3e6cb;
+}
+
+.availability-status {
+  font-size: 0.95em;
+  margin-top: 0.25rem;
+}
+
+.availability-status.checking {
+  color: #888;
+}
+
+.availability-status.available {
+  color: green;
+}
+
+.availability-status.unavailable {
+  color: red;
+} 

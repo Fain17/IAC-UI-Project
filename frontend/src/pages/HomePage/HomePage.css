@@ -1,0 +1,119 @@
+/* HomePage Styles */
+.sidebar {
+  width: 200px;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  background: #f8f9fa;
+  border-right: 1px solid #dee2e6;
+  display: flex;
+  flex-direction: column;
+  padding: 2rem 1rem;
+  box-sizing: border-box;
+  z-index: 1000;
+}
+
+.content {
+  margin-left: 220px;
+  padding: 20px;
+  font-family: Arial;
+  min-height: 100vh;
+  position: relative;
+}
+
+.profile-container {
+  position: absolute;
+  top: 24px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 1100;
+  cursor: pointer;
+}
+
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #007bff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  user-select: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  transition: transform 0.2s ease;
+}
+
+.name {
+  margin-top: 8px;
+  font-weight: 600;
+  color: #343a40;
+  font-size: 1rem;
+  text-align: center;
+  max-width: 120px;
+  word-break: break-all;
+}
+
+.email {
+  margin-top: 2px;
+  color: #555;
+  font-size: 0.95em;
+  text-align: center;
+  max-width: 140px;
+  word-break: break-all;
+}
+
+.sidebar h2 {
+  margin-bottom: 2rem;
+  font-size: 1.2rem;
+  color: #343a40;
+}
+
+.sidebar a {
+  margin-bottom: 1rem;
+  text-decoration: none;
+  color: #007bff;
+  font-weight: 500;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.sidebar a:hover {
+  background-color: #e9ecef;
+}
+
+.nav-link {
+  display: block;
+  padding: 0.75rem 1rem;
+  color: #333;
+  text-decoration: none;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  transition: background-color 0.2s;
+  font-weight: 500;
+}
+
+.nav-link:hover {
+  background-color: #f8f9fa;
+}
+
+.nav-link.active {
+  background-color: #007bff;
+  color: white;
+}
+
+.logout-button {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-top: auto;
+} 
