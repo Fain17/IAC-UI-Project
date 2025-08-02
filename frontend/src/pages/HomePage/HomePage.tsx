@@ -61,17 +61,17 @@ const HomePage: React.FC = () => {
   const displayName = username || email;
   const initial = displayName ? displayName[0].toUpperCase() : '?';
 
-  return (
+    return (
     <div>
-                   <aside className="sidebar">
-               <h2>Navigation</h2>
-               <Link to="/home" className="nav-link">Home</Link>
-               <Link to="/settings" className="nav-link">Settings</Link>
-               <Link to="/workflows" className="nav-link">Workflows</Link>
-               <button onClick={handleLogout} className="logout-button">
-                 Logout
-               </button>
-             </aside>
+      <aside className="sidebar">
+        <h2>Navigation</h2>
+        <Link to="/home" className="nav-link active">Home</Link>
+        <Link to="/settings" className="nav-link">Settings</Link>
+        <Link to="/workflows" className="nav-link">Workflows</Link>
+        <button onClick={handleLogout} className="logout-button">
+          Logout
+        </button>
+      </aside>
       <main className="content">
         <div className="profile-container" onClick={handleProfileClick} onMouseEnter={(e) => {
           e.currentTarget.querySelector('div')!.style.transform = 'scale(1.05)';

@@ -51,14 +51,86 @@ export interface MappingResponse {
   };
 }
 
-export const getMappings = (): Promise<MappingResponse> => API.get('/api/get-all-mappings');
+export const getMappings = (): Promise<MappingResponse> => API.get('/workflow/get-all-mappings');
 export const createMapping = (instance: string, launch_template: string): Promise<AxiosResponse> =>
-  API.post('/api/create-mapping', { instance, launch_template });
+  API.post('/workflow/create-mapping', { instance, launch_template });
 export const deleteMapping = (instance: string): Promise<AxiosResponse> =>
-  API.post('/api/delete-mapping', { instance });
+  API.post('/workflow/delete-mapping', { instance });
 export const runLaunchUpdate = (instance: string, launch_template: string): Promise<AxiosResponse> =>
-  API.post('/api/run-json', { server: instance, lt: launch_template });
+  API.post('/workflow/run-json', { server: instance, lt: launch_template });
 
 // Check if there are any existing users (for first user detection)
 export const checkFirstUser = (): Promise<AxiosResponse> => 
-  API.get('/auth/check-first-user'); 
+  API.get('/auth/check-first-user');
+
+// Workflow API interfaces
+export interface WorkflowStep {
+  action: string;
+  target?: string;
+  [key: string]: any;
+}
+
+export interface WorkflowCreate {
+  name: string;
+  description?: string;
+  steps: WorkflowStep[];
+  is_active?: boolean;
+  script_type?: string;
+  script_content?: string;
+  script_filename?: string;
+  run_command?: string;
+  dependencies?: string[];
+}
+
+export interface WorkflowUpdate {
+  name?: string;
+  description?: string;
+  steps?: WorkflowStep[];
+  is_active?: boolean;
+  script_type?: string;
+  script_content?: string;
+  script_filename?: string;
+  run_command?: string;
+  dependencies?: string[];
+}
+
+export interface Workflow {
+  id: number;
+  name: string;
+  description?: string;
+  steps: WorkflowStep[];
+  is_active: boolean;
+  script_type?: string;
+  script_content?: string;
+  script_filename?: string;
+  run_command?: string;
+  dependencies?: string[];
+  created_at: string;
+  updated_at: string;
+  user_id: number;
+}
+
+// Workflow API functions
+export const getWorkflows = (): Promise<AxiosResponse<Workflow[]>> => 
+  API.get('/workflow/list');
+
+export const getWorkflow = (workflowId: number): Promise<AxiosResponse<Workflow>> => 
+  API.get(`/workflow/${workflowId}`);
+
+export const createWorkflow = (workflow: WorkflowCreate): Promise<AxiosResponse<Workflow>> => 
+  API.post('/workflow/create', workflow);
+
+export const updateWorkflow = (workflowId: number, workflow: WorkflowUpdate): Promise<AxiosResponse<Workflow>> => 
+  API.put(`/workflow/${workflowId}`, workflow);
+
+export const deleteWorkflow = (workflowId: number): Promise<AxiosResponse> => 
+  API.delete(`/workflow/${workflowId}`);
+
+export const executeWorkflow = (workflowId: number): Promise<AxiosResponse> => 
+  API.post(`/workflow/${workflowId}/execute`);
+
+export const getWorkflowExecutions = (workflowId: number): Promise<AxiosResponse> => 
+  API.get(`/workflow/${workflowId}/executions`);
+
+export const installWorkflowDependencies = (workflowId: number): Promise<AxiosResponse> => 
+  API.post(`/workflow/${workflowId}/install-dependencies`); 

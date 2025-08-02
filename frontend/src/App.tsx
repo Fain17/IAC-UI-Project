@@ -5,6 +5,7 @@ import SettingsPage from './pages/SettingsPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AdminProfilePage from './pages/AdminProfilePage';
+import WorkflowsPage from './pages/WorkflowsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -47,6 +48,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <AdminProfilePage />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/workflows" 
+          element={
+            <ProtectedRoute>
+              <WorkflowsPage />
             </ProtectedRoute>
           } 
         />
