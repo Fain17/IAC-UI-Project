@@ -366,17 +366,25 @@ class WorkflowRepository:
     """Repository for workflow operations."""
     
     @staticmethod
-    async def create(user_id: int, name: str, description: str, steps: list, script_type: str = None, script_content: str = None, script_filename: str = None) -> Optional[int]:
+    async def create(user_id: int, name: str, description: str, steps: list, script_type: str = None, script_content: str = None, script_filename: str = None, run_command: str = None, dependencies: list = None, is_active: bool = True) -> Optional[int]:
         """Create a new workflow and return its ID."""
         if not db_service.client:
             return None
         try:
             steps_json = json.dumps(steps)
+            dependencies_json = json.dumps(dependencies) if dependencies else None
+            
             result = await db_service.client.execute(
-                "INSERT INTO workflows (user_id, name, description, steps, script_type, script_content, script_filename) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [user_id, name, description, steps_json, script_type, script_content, script_filename]
+                "INSERT INTO workflows (user_id, name, description, steps, script_type, script_content, script_filename, run_command, dependencies, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                [user_id, name, description, steps_json, script_type, script_content, script_filename, run_command, dependencies_json, is_active]
             )
-            return result.last_insert_id
+            
+            # Check if the insert actually worked
+            if not result.rows:
+                return None
+            
+            workflow_id = result.rows[0][0]
+            return workflow_id
         except Exception as e:
             logger.error(f"Error creating workflow: {e}")
             return None
@@ -388,7 +396,7 @@ class WorkflowRepository:
             return None
         try:
             result = await db_service.client.execute(
-                "SELECT id, name, description, steps, script_type, script_content, script_filename, is_active, created_at, updated_at FROM workflows WHERE id = ? AND user_id = ?",
+                "SELECT id, name, description, steps, script_type, script_content, script_filename, run_command, dependencies, is_active, created_at, updated_at FROM workflows WHERE id = ? AND user_id = ?",
                 [workflow_id, user_id]
             )
             
@@ -404,9 +412,11 @@ class WorkflowRepository:
                 "script_type": workflow[4],
                 "script_content": workflow[5],
                 "script_filename": workflow[6],
-                "is_active": bool(workflow[7]),
-                "created_at": workflow[8],
-                "updated_at": workflow[9]
+                "run_command": workflow[7],
+                "dependencies": json.loads(workflow[8]) if workflow[8] else None,
+                "is_active": bool(workflow[9]),
+                "created_at": workflow[10],
+                "updated_at": workflow[11]
             }
         except Exception as e:
             logger.error(f"Error getting workflow by ID: {e}")
@@ -419,7 +429,7 @@ class WorkflowRepository:
             return []
         try:
             result = await db_service.client.execute(
-                "SELECT id, name, description, steps, script_type, script_content, script_filename, is_active, created_at, updated_at FROM workflows WHERE user_id = ? ORDER BY created_at DESC",
+                "SELECT id, name, description, steps, script_type, script_content, script_filename, run_command, dependencies, is_active, created_at, updated_at FROM workflows WHERE user_id = ? ORDER BY created_at DESC",
                 [user_id]
             )
             
@@ -433,9 +443,11 @@ class WorkflowRepository:
                     "script_type": row[4],
                     "script_content": row[5],
                     "script_filename": row[6],
-                    "is_active": bool(row[7]),
-                    "created_at": row[8],
-                    "updated_at": row[9]
+                    "run_command": row[7],
+                    "dependencies": json.loads(row[8]) if row[8] else None,
+                    "is_active": bool(row[9]),
+                    "created_at": row[10],
+                    "updated_at": row[11]
                 })
             return workflows
         except Exception as e:
@@ -458,7 +470,7 @@ class WorkflowRepository:
             return False
     
     @staticmethod
-    async def update(workflow_id: int, user_id: int, name: str = None, description: str = None, steps: list = None, script_type: str = None, script_content: str = None, script_filename: str = None, is_active: bool = None) -> bool:
+    async def update(workflow_id: int, user_id: int, name: str = None, description: str = None, steps: list = None, script_type: str = None, script_content: str = None, script_filename: str = None, run_command: str = None, dependencies: list = None, is_active: bool = None) -> bool:
         """Update a workflow by ID for a specific user."""
         if not db_service.client:
             return False
@@ -485,6 +497,12 @@ class WorkflowRepository:
             if script_filename is not None:
                 updates.append("script_filename = ?")
                 params.append(script_filename)
+            if run_command is not None:
+                updates.append("run_command = ?")
+                params.append(run_command)
+            if dependencies is not None:
+                updates.append("dependencies = ?")
+                params.append(json.dumps(dependencies))
             if is_active is not None:
                 updates.append("is_active = ?")
                 params.append(is_active)

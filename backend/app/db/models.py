@@ -102,6 +102,8 @@ class WorkflowBase(BaseModel):
     script_type: Optional[str] = None  # sh, playbook, terraform, aws, etc.
     script_content: Optional[str] = None  # The actual code/script content
     script_filename: Optional[str] = None  # Original filename if uploaded
+    run_command: Optional[str] = None  # Command to run the script (e.g., "bash script.sh", "terraform apply")
+    dependencies: Optional[list] = None  # List of dependencies to install
 
 class WorkflowCreate(WorkflowBase):
     pass
@@ -114,6 +116,8 @@ class WorkflowUpdate(BaseModel):
     script_type: Optional[str] = None
     script_content: Optional[str] = None
     script_filename: Optional[str] = None
+    run_command: Optional[str] = None
+    dependencies: Optional[list] = None
 
 class Workflow(WorkflowBase):
     id: int
@@ -129,6 +133,7 @@ class ScriptExecutionRequest(BaseModel):
     workflow_id: int
     parameters: Optional[dict] = None  # Parameters to pass to the script
     environment: Optional[dict] = None  # Environment variables
+    run_command: Optional[str] = None  # Override the default run command
 
 class ScriptExecutionResponse(BaseModel):
     execution_id: str
@@ -136,4 +141,15 @@ class ScriptExecutionResponse(BaseModel):
     output: Optional[str] = None
     error: Optional[str] = None
     exit_code: Optional[int] = None
-    execution_time: Optional[float] = None 
+    execution_time: Optional[float] = None
+
+# Dependency Management Models
+class DependencyInstallRequest(BaseModel):
+    workflow_id: int
+    dependencies: list  # List of dependencies to install
+
+class DependencyInstallResponse(BaseModel):
+    success: bool
+    message: str
+    installed_dependencies: list
+    failed_dependencies: list 

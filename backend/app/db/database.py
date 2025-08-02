@@ -97,6 +97,8 @@ class DatabaseService:
                     script_type TEXT,     -- Type of script (sh, playbook, terraform, aws, etc.)
                     script_content TEXT,  -- The actual script/code content
                     script_filename TEXT, -- Original filename
+                    run_command TEXT,     -- Command to run the script
+                    dependencies TEXT,    -- JSON string of dependencies
                     is_active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

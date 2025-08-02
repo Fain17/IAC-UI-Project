@@ -9,6 +9,7 @@ from typing import Dict, Optional, Tuple
 from pathlib import Path
 import docker
 from app.db.repositories import ScriptExecutionRepository
+from app.services.dependency_manager import dependency_manager
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,8 @@ class ScriptExecutor:
         user_id: int, 
         script_type: str, 
         script_content: str, 
+        run_command: str = None,
+        dependencies: list = None,
         parameters: dict = None, 
         environment: dict = None
     ) -> Dict:
@@ -44,15 +47,27 @@ class ScriptExecutor:
                 execution_id, workflow_id, user_id, parameters, environment
             )
             
+            # Install dependencies if provided
+            if dependencies:
+                logger.info(f"Installing dependencies for workflow {workflow_id}: {dependencies}")
+                dep_result = await self._install_dependencies(dependencies, script_type)
+                if not dep_result["success"]:
+                    logger.warning(f"Dependency installation failed: {dep_result['error']}")
+                    # Continue execution anyway, dependencies might already be available
+            
             # Execute based on script type
             if script_type == "sh":
-                result = await self._execute_shell_script(script_content, parameters, environment)
+                result = await self._execute_shell_script(script_content, run_command, parameters, environment)
             elif script_type == "playbook":
-                result = await self._execute_ansible_playbook(script_content, parameters, environment)
+                result = await self._execute_ansible_playbook(script_content, run_command, parameters, environment)
             elif script_type == "terraform":
-                result = await self._execute_terraform(script_content, parameters, environment)
+                result = await self._execute_terraform(script_content, run_command, parameters, environment)
             elif script_type == "aws":
-                result = await self._execute_aws_script(script_content, parameters, environment)
+                result = await self._execute_aws_script(script_content, run_command, parameters, environment)
+            elif script_type == "python":
+                result = await self._execute_python_script(script_content, run_command, parameters, environment)
+            elif script_type == "node":
+                result = await self._execute_node_script(script_content, run_command, parameters, environment)
             else:
                 result = {
                     "status": "failed",
@@ -104,35 +119,58 @@ class ScriptExecutor:
                 "execution_time": execution_time
             }
     
-    async def _execute_shell_script(self, script_content: str, parameters: dict = None, environment: dict = None) -> Dict:
+    async def _install_dependencies(self, dependencies: list, script_type: str) -> Dict:
+        """Install dependencies based on script type."""
+        if script_type == "python":
+            return await dependency_manager.install_python_dependencies(dependencies)
+        elif script_type == "node":
+            return await dependency_manager.install_node_dependencies(dependencies)
+        else:
+            return await dependency_manager.install_dependencies(dependencies)
+    
+    async def _execute_shell_script(self, script_content: str, run_command: str = None, parameters: dict = None, environment: dict = None) -> Dict:
         """Execute a shell script in a sandboxed environment."""
         if self.docker_client:
-            return await self._execute_in_docker("alpine:latest", script_content, parameters, environment)
+            return await self._execute_in_docker("alpine:latest", script_content, run_command, parameters, environment)
         else:
-            return await self._execute_locally(script_content, parameters, environment)
+            return await self._execute_locally(script_content, run_command, parameters, environment)
     
-    async def _execute_ansible_playbook(self, playbook_content: str, parameters: dict = None, environment: dict = None) -> Dict:
+    async def _execute_ansible_playbook(self, playbook_content: str, run_command: str = None, parameters: dict = None, environment: dict = None) -> Dict:
         """Execute an Ansible playbook in a sandboxed environment."""
         if self.docker_client:
-            return await self._execute_in_docker("ansible/ansible-runner:latest", playbook_content, parameters, environment, "ansible-playbook")
+            return await self._execute_in_docker("ansible/ansible-runner:latest", playbook_content, run_command, parameters, environment)
         else:
-            return await self._execute_locally(playbook_content, parameters, environment, "ansible-playbook")
+            return await self._execute_locally(playbook_content, run_command, parameters, environment, "ansible-playbook")
     
-    async def _execute_terraform(self, terraform_content: str, parameters: dict = None, environment: dict = None) -> Dict:
+    async def _execute_terraform(self, terraform_content: str, run_command: str = None, parameters: dict = None, environment: dict = None) -> Dict:
         """Execute Terraform code in a sandboxed environment."""
         if self.docker_client:
-            return await self._execute_in_docker("hashicorp/terraform:latest", terraform_content, parameters, environment, "terraform")
+            return await self._execute_in_docker("hashicorp/terraform:latest", terraform_content, run_command, parameters, environment)
         else:
-            return await self._execute_locally(terraform_content, parameters, environment, "terraform")
+            return await self._execute_locally(terraform_content, run_command, parameters, environment, "terraform")
     
-    async def _execute_aws_script(self, aws_content: str, parameters: dict = None, environment: dict = None) -> Dict:
+    async def _execute_aws_script(self, aws_content: str, run_command: str = None, parameters: dict = None, environment: dict = None) -> Dict:
         """Execute AWS CLI commands in a sandboxed environment."""
         if self.docker_client:
-            return await self._execute_in_docker("amazon/aws-cli:latest", aws_content, parameters, environment)
+            return await self._execute_in_docker("amazon/aws-cli:latest", aws_content, run_command, parameters, environment)
         else:
-            return await self._execute_locally(aws_content, parameters, environment)
+            return await self._execute_locally(aws_content, run_command, parameters, environment)
     
-    async def _execute_in_docker(self, image: str, script_content: str, parameters: dict = None, environment: dict = None, command: str = None) -> Dict:
+    async def _execute_python_script(self, python_content: str, run_command: str = None, parameters: dict = None, environment: dict = None) -> Dict:
+        """Execute Python script in a sandboxed environment."""
+        if self.docker_client:
+            return await self._execute_in_docker("python:3.11-slim", python_content, run_command, parameters, environment)
+        else:
+            return await self._execute_locally(python_content, run_command, parameters, environment, "python")
+    
+    async def _execute_node_script(self, node_content: str, run_command: str = None, parameters: dict = None, environment: dict = None) -> Dict:
+        """Execute Node.js script in a sandboxed environment."""
+        if self.docker_client:
+            return await self._execute_in_docker("node:18-alpine", node_content, run_command, parameters, environment)
+        else:
+            return await self._execute_locally(node_content, run_command, parameters, environment, "node")
+    
+    async def _execute_in_docker(self, image: str, script_content: str, run_command: str = None, parameters: dict = None, environment: dict = None) -> Dict:
         """Execute script in Docker container."""
         try:
             # Create temporary directory for script
@@ -149,10 +187,17 @@ class ScriptExecutor:
                 if parameters:
                     env_vars.update(parameters)
                 
+                # Use custom run command or default
+                if run_command:
+                    # Replace script placeholder with actual path
+                    command = run_command.replace("script.sh", str(script_path)).replace("script.py", str(script_path)).replace("script.js", str(script_path))
+                else:
+                    command = f"/bin/sh {script_path}"
+                
                 # Execute in Docker container
                 container = self.docker_client.containers.run(
                     image,
-                    command=f"{command} {script_path}" if command else f"/bin/sh {script_path}",
+                    command=command,
                     environment=env_vars,
                     volumes={temp_dir: {'bind': '/workspace', 'mode': 'ro'}},
                     working_dir='/workspace',
@@ -198,7 +243,7 @@ class ScriptExecutor:
                 "exit_code": 1
             }
     
-    async def _execute_locally(self, script_content: str, parameters: dict = None, environment: dict = None, command: str = None) -> Dict:
+    async def _execute_locally(self, script_content: str, run_command: str = None, parameters: dict = None, environment: dict = None, default_command: str = None) -> Dict:
         """Execute script locally (fallback when Docker is not available)."""
         try:
             # Create temporary file
@@ -214,9 +259,13 @@ class ScriptExecutor:
                 if parameters:
                     env.update(parameters)
                 
-                # Execute script
-                if command:
-                    cmd = [command, temp_file_path]
+                # Use custom run command or default
+                if run_command:
+                    # Replace script placeholder with actual path
+                    command = run_command.replace("script.sh", temp_file_path).replace("script.py", temp_file_path).replace("script.js", temp_file_path)
+                    cmd = command.split()
+                elif default_command:
+                    cmd = [default_command, temp_file_path]
                 else:
                     cmd = ['/bin/bash', temp_file_path]
                 
