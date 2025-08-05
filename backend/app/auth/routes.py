@@ -8,7 +8,9 @@ from app.auth.dependencies import get_current_user
 from typing import Optional
 import secrets
 from app.auth.dependencies import get_user_from_token_allow_expired
+import logging
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 security = HTTPBearer()
@@ -36,7 +38,7 @@ class EditUsernameRequest(BaseModel):
     new_username: str
 
 class DeleteAccountRequest(BaseModel):
-    password: str
+    password: Optional[str] = None
 
 class RequestPasswordReset(BaseModel):
     email: str
@@ -119,69 +121,59 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
 
 
 
-@router.get("/verify-token", response_model=TokenVerificationResponse, summary="Verify Current User's Token")
-async def verify_token_get(
-    request: Request,
+@router.get("/verify-token", tags=["Authentication"])
+async def verify_token_route(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Verify the current user's access token and get session information.
-    
-    **Usage:**
-    - Requires authentication (Bearer token in Authorization header)
-    - Returns current user information and token expiration details
-    - Useful for frontend to check token validity and remaining time
-    
-    **Security:**
-    - Only authenticated users can access this endpoint
-    - Prevents unauthorized token testing
-    - Returns information only for the authenticated user's token
+    Verify current token validity and get expiry information.
+    Returns smart expiry data for frontend optimization.
     """
     try:
-        # Get the token from the current user's session
+        # Get current token from request
+        from fastapi import Request
+        request = Request
         auth_header = request.headers.get("Authorization")
-        
         if not auth_header or not auth_header.startswith("Bearer "):
-            return TokenVerificationResponse(valid=False, error="No valid authorization header")
+            raise HTTPException(status_code=401, detail="Invalid authorization header")
         
         token = auth_header.split(" ")[1]
         
-        # Get session info to get expiration details
+        # Verify token and get session info
         session_info = await auth_service.get_session_info_for_token(token)
         
-        if session_info is None:
-            return TokenVerificationResponse(valid=False, error="Token not found in database")
+        if not session_info:
+            return JSONResponse({
+                "valid": False,
+                "error": "Token not found or invalid",
+                "should_refresh": False,
+                "time_remaining_seconds": 0
+            })
         
-        # Verify the token matches the current user
-        payload = await auth_service.verify_token(token)
+        time_remaining = session_info["time_remaining_seconds"]
         
-        if payload is None:
-            return TokenVerificationResponse(
-                valid=False, 
-                error="Invalid token",
-                expires_at=session_info["expires_at"],
-                time_remaining_seconds=session_info["time_remaining_seconds"]
-            )
+        # Determine if refresh is needed (30 seconds threshold)
+        should_refresh = time_remaining <= 30
         
-        # Double-check that the token belongs to the current user
-        token_user_id = payload.get("sub")
-        if str(token_user_id) != str(current_user["id"]):
-            return TokenVerificationResponse(
-                valid=False, 
-                error="Token does not belong to current user",
-                expires_at=session_info["expires_at"],
-                time_remaining_seconds=session_info["time_remaining_seconds"]
-            )
+        return JSONResponse({
+            "valid": True,
+            "user": current_user,
+            "expires_at": session_info["expires_at"],
+            "time_remaining_seconds": time_remaining,
+            "should_refresh": should_refresh,
+            "refresh_threshold_seconds": 30
+        })
         
-        return TokenVerificationResponse(
-            valid=True, 
-            user=current_user,
-            expires_at=session_info["expires_at"],
-            time_remaining_seconds=session_info["time_remaining_seconds"]
-        )
-    
+    except HTTPException:
+        raise
     except Exception as e:
-        return TokenVerificationResponse(valid=False, error=f"Token verification failed: {str(e)}")
+        logger.error(f"Error verifying token: {e}")
+        return JSONResponse({
+            "valid": False,
+            "error": "Token verification failed",
+            "should_refresh": False,
+            "time_remaining_seconds": 0
+        })
 
 @router.post("/logout")
 async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -196,7 +188,18 @@ async def delete_account(
     data: DeleteAccountRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    result = await auth_service.delete_user_account(user_id=current_user["id"], password=data.password)
+    # Check if user is admin
+    is_admin = current_user.get("is_admin", False)
+    
+    # For admin users, password is required
+    if is_admin:
+        if not data.password:
+            raise HTTPException(status_code=400, detail="Password is required for admin users")
+        result = await auth_service.delete_user_account(user_id=current_user["id"], password=data.password, require_password=True)
+    else:
+        # For regular users, password is optional
+        result = await auth_service.delete_user_account(user_id=current_user["id"], password=data.password or "", require_password=False)
+    
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])
     return {"message": result["message"]}
@@ -231,6 +234,10 @@ async def hard_reset_password(data: HardResetPasswordRequest):
 
 @router.get("/check-first-user", response_model=dict)
 async def check_first_user():
+    """
+    Check if this is the first user in the system.
+    Used by frontend to determine if the first user should be made admin by default.
+    """
     from app.db.database import db_service
     if not db_service.client:
         raise HTTPException(status_code=500, detail="Database client not initialized")
@@ -310,124 +317,7 @@ async def logout_all_devices(current_user: dict = Depends(get_current_user)):
     else:
         raise HTTPException(status_code=500, detail="Failed to logout from all devices")
 
-@router.get("/token-settings", response_model=dict)
-async def get_token_settings():
-    """Get current token timing settings."""
-    # Calculate refresh token duration in minutes for display
-    refresh_minutes = auth_service.refresh_token_expire_days * 24 * 60 if auth_service.refresh_token_expire_days < 1 else auth_service.refresh_token_expire_days * 24 * 60
-    
-    return {
-        "access_token_expire_minutes": auth_service.access_token_expire_minutes,
-        "refresh_token_expire_days": auth_service.refresh_token_expire_days,
-        "refresh_token_expire_minutes": round(refresh_minutes, 2),
-        "cleanup_interval_seconds": 60,  # From config
-        "description": {
-            "access_token": "Short-lived token for API requests",
-            "refresh_token": "Long-lived token for getting new access tokens",
-            "production_mode": "Standard durations for production use"
-        }
-    }
-
-@router.get("/debug-sessions", response_model=dict)
-async def debug_sessions():
-    """Get debug information about all sessions."""
-    return await auth_service.get_all_sessions_info()
-
-@router.post("/cleanup-sessions", response_model=dict)
-async def cleanup_sessions():
-    """Manually trigger session cleanup."""
-    cleaned_count = await auth_service.cleanup_expired_sessions()
-    active_count = await auth_service.get_active_sessions_count()
-    return {
-        "message": f"Cleanup completed",
-        "sessions_cleaned": cleaned_count,
-        "active_sessions_remaining": active_count
-    }
 
 
 
-@router.get("/debug-refresh-tokens", response_model=dict, summary="Debug Refresh Tokens")
-async def debug_refresh_tokens(current_user: dict = Depends(get_current_user)):
-    """
-    Debug endpoint to see all refresh tokens for the current user.
-    
-    **Usage:**
-    - Shows all refresh tokens for the authenticated user
-    - Includes expiration times and revocation status
-    - Useful for monitoring refresh token lifecycle
-    """
-    try:
-        from app.db.repositories import RefreshTokenRepository
-        from app.db.database import db_service
-        from datetime import datetime, timezone
-        
-        if not db_service.client:
-            return {"error": "Database client not initialized"}
-        
-        # Get all refresh tokens for the current user
-        result = await db_service.client.execute(
-            "SELECT id, refresh_token, expires_at, is_revoked, created_at FROM refresh_tokens WHERE user_id = ?",
-            [current_user["id"]]
-        )
-        
-        tokens = []
-        current_time = datetime.now(timezone.utc)
-        
-        for row in result.rows:
-            token_id, refresh_token, expires_at_str, is_revoked, created_at = row
-            
-            try:
-                # Parse expiration timestamp
-                if isinstance(expires_at_str, str):
-                    if 'T' in expires_at_str:
-                        expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
-                    else:
-                        expires_at = datetime.strptime(expires_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                elif isinstance(expires_at_str, (int, float)):
-                    if expires_at_str > 1e12:  # Likely milliseconds
-                        expires_at = datetime.fromtimestamp(expires_at_str / 1000, tz=timezone.utc)
-                    else:  # Likely seconds
-                        expires_at = datetime.fromtimestamp(expires_at_str, tz=timezone.utc)
-                elif isinstance(expires_at_str, datetime):
-                    expires_at = expires_at_str
-                else:
-                    expires_at = None
-                
-                time_remaining = (expires_at - current_time).total_seconds() if expires_at else None
-                is_expired = time_remaining <= 0 if time_remaining is not None else None
-                
-                tokens.append({
-                    "token_id": token_id,
-                    "token_preview": refresh_token[:20] + "..." if len(refresh_token) > 20 else refresh_token,
-                    "expires_at": str(expires_at_str),
-                    "time_remaining_seconds": max(0, int(time_remaining)) if time_remaining is not None else None,
-                    "is_expired": is_expired,
-                    "is_revoked": bool(is_revoked),
-                    "created_at": str(created_at),
-                    "status": "expired" if is_expired else ("revoked" if is_revoked else "active")
-                })
-                
-            except Exception as e:
-                tokens.append({
-                    "token_id": token_id,
-                    "error": f"Error parsing token: {e}",
-                    "status": "error"
-                })
-        
-        return {
-            "user_id": current_user["id"],
-            "username": current_user["username"],
-            "current_time": current_time.isoformat(),
-            "total_refresh_tokens": len(tokens),
-            "active_tokens": len([t for t in tokens if t.get("status") == "active"]),
-            "expired_tokens": len([t for t in tokens if t.get("status") == "expired"]),
-            "revoked_tokens": len([t for t in tokens if t.get("status") == "revoked"]),
-            "tokens": tokens
-        }
-        
-    except Exception as e:
-        return {"error": f"Error getting refresh tokens: {str(e)}"}
 
- 
-
- 

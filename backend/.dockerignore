@@ -25,9 +25,13 @@ coverage.xml
 .hypothesis
 
 # Virtual environments
-venv/
+.env
+.venv
 env/
+venv/
 ENV/
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
@@ -45,17 +49,12 @@ ENV/
 ehthumbs.db
 Thumbs.db
 
-# Docker
-Dockerfile
-.dockerignore
+# Project specific
+data/
+*.db
+*.sqlite
+*.sqlite3
 
-# Documentation
-README.md
-*.md
-
-# Development files
-.env
-.env.local
-.env.development
-.env.test
-.env.production 
+# Keep SSL certificates and generation script
+!generate_ssl_certs.py
+!certs/ 

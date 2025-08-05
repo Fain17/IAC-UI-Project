@@ -7,6 +7,7 @@ from app.auth.dependencies import get_current_user
 from app.db.models import WorkflowCreate, WorkflowUpdate, ScriptExecutionRequest, DependencyInstallRequest
 from typing import List
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +113,6 @@ async def upload_script_route(
     Supports: .sh, .yml, .tf, .py, .js files
     """
     try:
-        import json
-        
         # Validate script type
         if script_type not in ["sh", "playbook", "terraform", "aws", "python", "node"]:
             raise HTTPException(status_code=400, detail="Invalid script type")

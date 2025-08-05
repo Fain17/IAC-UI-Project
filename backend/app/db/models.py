@@ -152,4 +152,67 @@ class DependencyInstallResponse(BaseModel):
     success: bool
     message: str
     installed_dependencies: list
-    failed_dependencies: list 
+    failed_dependencies: list
+
+# User Management Models
+class UserGroupBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class UserGroupCreate(UserGroupBase):
+    pass
+
+class UserGroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+class UserGroup(UserGroupBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class UserPermissionBase(BaseModel):
+    user_id: int
+    permission_level: str  # admin, manager, viewer
+
+class UserPermissionCreate(UserPermissionBase):
+    pass
+
+class UserPermissionUpdate(BaseModel):
+    permission_level: str
+
+class UserPermission(UserPermissionBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class UserGroupAssignmentBase(BaseModel):
+    user_id: int
+    group_id: int
+
+class UserGroupAssignmentCreate(UserGroupAssignmentBase):
+    pass
+
+class UserGroupAssignment(UserGroupAssignmentBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class AdminUserCreate(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+    permission_level: str = "viewer"  # admin, manager, viewer
+    group_id: Optional[int] = None
+
+class AdminUserPermissionUpdate(BaseModel):
+    permission_level: Optional[str] = None
+    is_active: Optional[bool] = None 

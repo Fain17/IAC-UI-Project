@@ -331,7 +331,7 @@ class AuthService:
         )
         return {"success": True, "message": "Password updated successfully"}
 
-    async def delete_user_account(self, user_id: int, password: str) -> dict:
+    async def delete_user_account(self, user_id: int, password: str, require_password: bool = True) -> dict:
         from app.db.database import db_service
         if not db_service.client:
             raise RuntimeError("Database client not initialized")
@@ -339,9 +339,16 @@ class AuthService:
             user = await UserRepository.get_by_id(user_id)
             if not user:
                 return {"success": False, "error": "User not found"}
-            hashed = self.get_password_hash(password)
-            if not hashed or not self.verify_password(password, hashed):
-                return {"success": False, "error": "Password is incorrect"}
+            
+            # Check if password is required and validate it
+            if require_password:
+                if not password:
+                    return {"success": False, "error": "Password is required"}
+                hashed = self.get_password_hash(password)
+                if not hashed or not self.verify_password(password, hashed):
+                    return {"success": False, "error": "Password is incorrect"}
+            
+            # Delete the user
             result = await db_service.client.execute(
                 "DELETE FROM users WHERE id = ?",
                 [user_id]

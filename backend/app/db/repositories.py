@@ -213,7 +213,63 @@ class UserRepository:
             return True
         except Exception as e:
             logger.error(f"Error creating user: {e}")
-            return False 
+            return False
+    
+    @staticmethod
+    async def get_all() -> List[Dict]:
+        """Get all users."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, username, email, is_active, is_admin, created_at, updated_at FROM users ORDER BY username"
+            )
+            
+            users = []
+            for row in result.rows:
+                users.append({
+                    "id": row[0],
+                    "username": row[1],
+                    "email": row[2],
+                    "is_active": bool(row[3]),
+                    "is_admin": bool(row[4]),
+                    "created_at": row[5],
+                    "updated_at": row[6]
+                })
+            return users
+        except Exception as e:
+            logger.error(f"Error getting all users: {e}")
+            return []
+    
+    @staticmethod
+    async def delete(user_id: int) -> bool:
+        """Delete a user."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM users WHERE id = ?",
+                [user_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting user: {e}")
+            return False
+    
+    @staticmethod
+    async def update_is_active(user_id: int, is_active: bool) -> bool:
+        """Update user's active status."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [is_active, user_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating user active status: {e}")
+            return False
 
 class UserSessionRepository:
     """Repository for user session operations."""
@@ -615,4 +671,277 @@ class ScriptExecutionRepository:
             return executions
         except Exception as e:
             logger.error(f"Error getting workflow executions: {e}")
-            return [] 
+            return []
+
+class UserGroupRepository:
+    """Repository for user group operations."""
+    
+    @staticmethod
+    async def create(name: str, description: str = None) -> Optional[int]:
+        """Create a new user group and return its ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "INSERT INTO user_groups (name, description) VALUES (?, ?) RETURNING id",
+                [name, description]
+            )
+            return result.rows[0][0] if result.rows else None
+        except Exception as e:
+            logger.error(f"Error creating user group: {e}")
+            return None
+    
+    @staticmethod
+    async def get_by_id(group_id: int) -> Optional[Dict]:
+        """Get user group by ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, name, description, created_at, updated_at FROM user_groups WHERE id = ?",
+                [group_id]
+            )
+            
+            if not result.rows:
+                return None
+            
+            group = result.rows[0]
+            return {
+                "id": group[0],
+                "name": group[1],
+                "description": group[2],
+                "created_at": group[3],
+                "updated_at": group[4]
+            }
+        except Exception as e:
+            logger.error(f"Error getting user group by ID: {e}")
+            return None
+    
+    @staticmethod
+    async def get_all() -> List[Dict]:
+        """Get all user groups."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, name, description, created_at, updated_at FROM user_groups ORDER BY name"
+            )
+            
+            groups = []
+            for row in result.rows:
+                groups.append({
+                    "id": row[0],
+                    "name": row[1],
+                    "description": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
+            return groups
+        except Exception as e:
+            logger.error(f"Error getting all user groups: {e}")
+            return []
+    
+    @staticmethod
+    async def update(group_id: int, name: str = None, description: str = None) -> bool:
+        """Update a user group."""
+        if not db_service.client:
+            return False
+        try:
+            updates = []
+            params = []
+            
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            
+            if not updates:
+                return False
+            
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(group_id)
+            
+            query = f"UPDATE user_groups SET {', '.join(updates)} WHERE id = ?"
+            result = await db_service.client.execute(query, params)
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating user group: {e}")
+            return False
+    
+    @staticmethod
+    async def delete(group_id: int) -> bool:
+        """Delete a user group."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM user_groups WHERE id = ?",
+                [group_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting user group: {e}")
+            return False
+
+class UserPermissionRepository:
+    """Repository for user permission operations."""
+    
+    @staticmethod
+    async def create(user_id: int, permission_level: str) -> Optional[int]:
+        """Create a new user permission and return its ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "INSERT INTO user_permissions (user_id, permission_level) VALUES (?, ?) RETURNING id",
+                [user_id, permission_level]
+            )
+            return result.rows[0][0] if result.rows else None
+        except Exception as e:
+            logger.error(f"Error creating user permission: {e}")
+            return None
+    
+    @staticmethod
+    async def get_by_user_id(user_id: int) -> Optional[Dict]:
+        """Get user permission by user ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, user_id, permission_level, created_at, updated_at FROM user_permissions WHERE user_id = ?",
+                [user_id]
+            )
+            
+            if not result.rows:
+                return None
+            
+            permission = result.rows[0]
+            return {
+                "id": permission[0],
+                "user_id": permission[1],
+                "permission_level": permission[2],
+                "created_at": permission[3],
+                "updated_at": permission[4]
+            }
+        except Exception as e:
+            logger.error(f"Error getting user permission: {e}")
+            return None
+    
+    @staticmethod
+    async def update(user_id: int, permission_level: str) -> bool:
+        """Update user permission."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "UPDATE user_permissions SET permission_level = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                [permission_level, user_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating user permission: {e}")
+            return False
+    
+    @staticmethod
+    async def delete(user_id: int) -> bool:
+        """Delete user permission."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM user_permissions WHERE user_id = ?",
+                [user_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting user permission: {e}")
+            return False
+
+class UserGroupAssignmentRepository:
+    """Repository for user group assignment operations."""
+    
+    @staticmethod
+    async def create(user_id: int, group_id: int) -> Optional[int]:
+        """Assign a user to a group and return the assignment ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "INSERT INTO user_group_assignments (user_id, group_id) VALUES (?, ?) RETURNING id",
+                [user_id, group_id]
+            )
+            return result.rows[0][0] if result.rows else None
+        except Exception as e:
+            logger.error(f"Error creating user group assignment: {e}")
+            return None
+    
+    @staticmethod
+    async def get_user_groups(user_id: int) -> List[Dict]:
+        """Get all groups for a user."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT ug.id, ug.name, ug.description, uga.created_at 
+                FROM user_groups ug 
+                JOIN user_group_assignments uga ON ug.id = uga.group_id 
+                WHERE uga.user_id = ?
+            """, [user_id])
+            
+            groups = []
+            for row in result.rows:
+                groups.append({
+                    "id": row[0],
+                    "name": row[1],
+                    "description": row[2],
+                    "assigned_at": row[3]
+                })
+            return groups
+        except Exception as e:
+            logger.error(f"Error getting user groups: {e}")
+            return []
+    
+    @staticmethod
+    async def get_group_users(group_id: int) -> List[Dict]:
+        """Get all users in a group."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT u.id, u.username, u.email, u.is_active, uga.created_at 
+                FROM users u 
+                JOIN user_group_assignments uga ON u.id = uga.user_id 
+                WHERE uga.group_id = ?
+            """, [group_id])
+            
+            users = []
+            for row in result.rows:
+                users.append({
+                    "id": row[0],
+                    "username": row[1],
+                    "email": row[2],
+                    "is_active": bool(row[3]),
+                    "assigned_at": row[4]
+                })
+            return users
+        except Exception as e:
+            logger.error(f"Error getting group users: {e}")
+            return []
+    
+    @staticmethod
+    async def remove_user_from_group(user_id: int, group_id: int) -> bool:
+        """Remove a user from a group."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM user_group_assignments WHERE user_id = ? AND group_id = ?",
+                [user_id, group_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error removing user from group: {e}")
+            return False 

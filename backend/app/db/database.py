@@ -127,6 +127,43 @@ class DatabaseService:
                 )
             """)
             
+            # Create user groups table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS user_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create user permissions table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS user_permissions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    permission_level TEXT NOT NULL CHECK (permission_level IN ('admin', 'manager', 'viewer')),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    UNIQUE(user_id)
+                )
+            """)
+            
+            # Create user group assignments table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS user_group_assignments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    group_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    FOREIGN KEY (group_id) REFERENCES user_groups (id),
+                    UNIQUE(user_id, group_id)
+                )
+            """)
+            
             logger.info("Database tables created successfully")
         except Exception as e:
             logger.error(f"Failed to create tables: {e}")

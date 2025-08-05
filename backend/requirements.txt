@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 boto3
 python-multipart
 libsql-client
@@ -9,3 +9,4 @@ pydantic-extra-types
 bcrypt==4.0.1
 email-validator
 docker
+websockets
