@@ -154,61 +154,61 @@ const RegisterPage: React.FC = () => {
       )}
       <form onSubmit={handleSubmit} className="register-form">
         <div className="form-group">
-          <label htmlFor="username">Username</label>
-          <input
-            id="username"
-            name="username"
-            type="text"
-            value={formData.username}
-            onChange={handleChange}
-            placeholder="Enter your username"
-            required
-          />
+        <label htmlFor="username">Username</label>
+        <input
+          id="username"
+          name="username"
+          type="text"
+          value={formData.username}
+          onChange={handleChange}
+          placeholder="Enter your username"
+          required
+        />
           {checkingUsername && <span className="availability-status checking">Checking...</span>}
           {usernameAvailable === false && <span className="availability-status unavailable">Username is taken</span>}
           {usernameAvailable === true && <span className="availability-status available">Username is available</span>}
         </div>
 
         <div className="form-group">
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            value={formData.email}
-            onChange={handleChange}
-            placeholder="Enter your email"
-            required
-          />
+        <label htmlFor="email">Email</label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          value={formData.email}
+          onChange={handleChange}
+          placeholder="Enter your email"
+          required
+        />
           {checkingEmail && <span className="availability-status checking">Checking...</span>}
           {emailAvailable === false && <span className="availability-status unavailable">Email is taken</span>}
           {emailAvailable === true && <span className="availability-status available">Email is available</span>}
         </div>
 
         <div className="form-group">
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            value={formData.password}
-            onChange={handleChange}
-            placeholder="Enter your password"
-            required
-          />
+        <label htmlFor="password">Password</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          value={formData.password}
+          onChange={handleChange}
+          placeholder="Enter your password"
+          required
+        />
         </div>
 
         <div className="form-group">
-          <label htmlFor="confirmPassword">Confirm Password</label>
-          <input
-            id="confirmPassword"
-            name="confirmPassword"
-            type="password"
-            value={formData.confirmPassword}
-            onChange={handleChange}
-            placeholder="Confirm your password"
-            required
-          />
+        <label htmlFor="confirmPassword">Confirm Password</label>
+        <input
+          id="confirmPassword"
+          name="confirmPassword"
+          type="password"
+          value={formData.confirmPassword}
+          onChange={handleChange}
+          placeholder="Confirm your password"
+          required
+        />
         </div>
 
         <button type="submit" disabled={isLoading} className="submit-button">

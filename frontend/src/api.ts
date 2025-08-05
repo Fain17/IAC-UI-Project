@@ -133,4 +133,59 @@ export const getWorkflowExecutions = (workflowId: number): Promise<AxiosResponse
   API.get(`/workflow/${workflowId}/executions`);
 
 export const installWorkflowDependencies = (workflowId: number): Promise<AxiosResponse> => 
-  API.post(`/workflow/${workflowId}/install-dependencies`); 
+  API.post(`/workflow/${workflowId}/install-dependencies`);
+
+// Admin User Management API interfaces
+export interface AdminUser {
+  id: number;
+  username: string;
+  email: string;
+  is_active: boolean;
+  is_admin: boolean;
+  created_at: string;
+  updated_at: string;
+  permission_level: string;
+  groups: string[];
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+}
+
+export interface CreateUserRequest {
+  username: string;
+  email: string;
+  password: string;
+  role?: string;
+  group?: string;
+  is_active?: boolean;
+}
+
+// Admin User Management API functions
+export const getAdminUsers = (): Promise<AxiosResponse<AdminUsersResponse>> => 
+  API.get('/admin/users');
+
+export const createAdminUser = (userData: CreateUserRequest): Promise<AxiosResponse<AdminUser>> => 
+  API.post('/admin/users', userData);
+
+export const getAdminUser = (userId: number): Promise<AxiosResponse<AdminUser>> => 
+  API.get(`/admin/users/${userId}`);
+
+export interface UpdateUserPermissionsRequest {
+  permission_level: string;
+  is_admin?: boolean;
+  is_active?: boolean;
+}
+
+export const updateUserPermissions = (userId: number, permissions: UpdateUserPermissionsRequest): Promise<AxiosResponse<AdminUser>> => 
+  API.put(`/admin/users/${userId}/permissions`, permissions);
+
+export interface UpdateUserActiveStatusRequest {
+  is_active: boolean;
+}
+
+export const updateUserActiveStatus = (userId: number, isActive: boolean): Promise<AxiosResponse<AdminUser>> => 
+  API.patch(`/admin/users/${userId}/active-status`, { is_active: isActive });
+
+export const deleteUser = (userId: number): Promise<AxiosResponse> => 
+  API.delete(`/admin/users/${userId}`); 

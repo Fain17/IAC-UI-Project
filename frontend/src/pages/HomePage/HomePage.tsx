@@ -61,7 +61,7 @@ const HomePage: React.FC = () => {
   const displayName = username || email;
   const initial = displayName ? displayName[0].toUpperCase() : '?';
 
-    return (
+  return (
     <div>
       <aside className="sidebar">
         <h2>Navigation</h2>

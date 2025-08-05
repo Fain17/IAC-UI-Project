@@ -29,6 +29,7 @@ const LoginPage: React.FC = () => {
       });
       
       // Store tokens and user data using TokenManager
+      // This will automatically establish WebSocket connection
       if (response.data.refresh_token) {
         tokenManager.setTokens(
           response.data.access_token,
@@ -64,26 +65,26 @@ const LoginPage: React.FC = () => {
       <h1>Login</h1>
       <form onSubmit={handleSubmit} className="login-form">
         <div className="form-group">
-          <label htmlFor="usernameOrEmail">Username or Email</label>
-          <input
-            id="usernameOrEmail"
-            type="text"
-            value={usernameOrEmail}
-            onChange={e => setUsernameOrEmail(e.target.value)}
-            placeholder="Enter your username or email"
-            required
-          />
+        <label htmlFor="usernameOrEmail">Username or Email</label>
+        <input
+          id="usernameOrEmail"
+          type="text"
+          value={usernameOrEmail}
+          onChange={e => setUsernameOrEmail(e.target.value)}
+          placeholder="Enter your username or email"
+          required
+        />
         </div>
         <div className="form-group">
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Enter your password"
-            required
-          />
+        <label htmlFor="password">Password</label>
+        <input
+          id="password"
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          placeholder="Enter your password"
+          required
+        />
         </div>
         <button type="submit" disabled={isLoading} className="submit-button">
           {isLoading ? 'Logging in...' : 'Login'}

@@ -1,3 +1,5 @@
+import wsTokenManager from './websocketTokenManager';
+
 interface UserData {
     username?: string;
     email?: string;
@@ -8,14 +10,12 @@ class TokenManager {
     private tokenKey: string;
     private refreshTokenKey: string;
     private userKey: string;
-    private checkInterval: NodeJS.Timeout | null;
     private apiBaseUrl: string;
 
     constructor() {
         this.tokenKey = 'auth_token';
         this.refreshTokenKey = 'refresh_token';
         this.userKey = 'user_data';
-        this.checkInterval = null;
         this.apiBaseUrl = 'http://localhost:8000';
     }
 
@@ -24,14 +24,18 @@ class TokenManager {
         localStorage.setItem(this.tokenKey, accessToken);
         localStorage.setItem(this.refreshTokenKey, refreshToken);
         localStorage.setItem(this.userKey, JSON.stringify(userData));
-        this.startTokenCheck();
+        
+        // Connect WebSocket for token monitoring
+        wsTokenManager.connect(accessToken);
     }
 
     // Store token and user data (backward compatibility)
     setToken(token: string, userData: UserData): void {
         localStorage.setItem(this.tokenKey, token);
         localStorage.setItem(this.userKey, JSON.stringify(userData));
-        this.startTokenCheck();
+        
+        // Connect WebSocket for token monitoring
+        wsTokenManager.connect(token);
     }
 
     // Get stored access token
@@ -55,7 +59,9 @@ class TokenManager {
         localStorage.removeItem(this.tokenKey);
         localStorage.removeItem(this.refreshTokenKey);
         localStorage.removeItem(this.userKey);
-        this.stopTokenCheck();
+        
+        // Disconnect WebSocket
+        wsTokenManager.disconnect();
         
         // Redirect to login page
         if (window.location.pathname !== '/login') {
@@ -125,174 +131,34 @@ class TokenManager {
         }
     }
 
-    // Check token validity with backend and attempt refresh if needed
-    async checkTokenValidity(): Promise<boolean> {
-        const token = this.getToken();
-        if (!token) {
-            this.clearAuth();
-            return false;
-        }
-
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/auth/verify-token`, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                
-                console.log('Token check response:', {
-                    valid: data.valid,
-                    timeRemaining: data.time_remaining_seconds,
-                    willExpireSoon: data.time_remaining_seconds <= 30
-                });
-                
-                // Check if token is valid
-                if (!data.valid) {
-                    console.log('Token is invalid, attempting refresh...');
-                    const refreshSuccess = await this.refreshAccessToken();
-                    if (!refreshSuccess) {
-                        console.log('Token refresh failed, redirecting to login...');
-                        this.clearAuth();
-                        return false;
-                    }
-                    return true;
-                }
-                
-                // Auto-refresh when token is about to expire (below 60 seconds for 15-min tokens)
-                if (data.time_remaining_seconds <= 60 && data.time_remaining_seconds > 0) {
-                    console.log(`Token expiring soon (${data.time_remaining_seconds}s remaining), auto-refreshing...`);
-                    const refreshSuccess = await this.refreshAccessToken();
-                    if (!refreshSuccess) {
-                        console.log('Auto-refresh failed, but token still valid, continuing...');
-                        // Don't logout yet, let the user continue until token actually expires
-                    } else {
-                        console.log('Token auto-refreshed successfully - new token stored');
-                    }
-                    return true;
-                }
-                
-                // Only logout if token has actually expired (0 or negative seconds)
-                if (data.time_remaining_seconds <= 0) {
-                    console.log('Token has expired, attempting refresh...');
-                    const refreshSuccess = await this.refreshAccessToken();
-                    if (!refreshSuccess) {
-                        console.log('Token refresh failed, redirecting to login...');
-                        this.clearAuth();
-                        return false;
-                    }
-                    return true;
-                }
-                
-                return true;
-            } else if (response.status === 401) {
-                // Token is invalid, try to refresh
-                console.log('Token invalid (401), attempting refresh...');
-                const refreshSuccess = await this.refreshAccessToken();
-                if (!refreshSuccess) {
-                    console.log('Token refresh failed, clearing auth...');
-                    this.clearAuth();
-                    return false;
-                }
-                return true;
-            } else {
-                // Other error - don't logout immediately, just log the error
-                console.log('Token check failed, status:', response.status);
-                console.log('Response headers:', response.headers);
-                try {
-                    const errorText = await response.text();
-                    console.log('Error response body:', errorText);
-                } catch (e) {
-                    console.log('Could not read error response body');
-                }
-                // Don't logout on other errors, just return true to keep the session
-                return true;
-            }
-        } catch (error) {
-            console.error('Error checking token validity:', error);
-            // On network error, keep the token but don't clear auth
-            return true;
-        }
-    }
-
-    // Start periodic token checking
-    startTokenCheck(): void {
-        // Don't start if already running
-        if (this.checkInterval) {
-            return;
-        }
-        
-        // Only start if we have a token
-        if (!this.getToken()) {
-            return;
-        }
-        
-        console.log('Starting token validity checks...');
-        // Check every 30 seconds for efficient auto-refresh
-        this.checkInterval = setInterval(async () => {
-            await this.checkTokenValidity();
-        }, 30000);
-    }
-
-    // Stop periodic token checking
-    stopTokenCheck(): void {
-        if (this.checkInterval) {
-            clearInterval(this.checkInterval);
-            this.checkInterval = null;
-            console.log('Stopped token validity checks');
-        }
-    }
-
-    // Initialize token checking for existing sessions (call on app startup)
+    // Initialize token checking on app startup
     initializeTokenChecking(): void {
-        const token = this.getToken();
-        if (token) {
-            console.log('Found existing token, starting validity checks...');
-            this.startTokenCheck();
-        } else {
-            console.log('No token found, skipping validity checks');
-        }
-    }
-
-    // Check if token needs auto-refresh (for external components)
-    async checkIfAutoRefreshNeeded(): Promise<{ needsRefresh: boolean; timeRemaining: number }> {
+        console.log('🚀 Initializing token checking...');
+        
         const token = this.getToken();
         if (!token) {
-            return { needsRefresh: false, timeRemaining: 0 };
+            console.log('❌ No token found, skipping token checking initialization');
+            return;
         }
 
-        try {
-            const response = await fetch(`${this.apiBaseUrl}/auth/verify-token`, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
+        console.log('🔌 Attempting WebSocket connection for token monitoring...');
+        wsTokenManager.connect(token).catch(error => {
+            console.warn('⚠️ WebSocket connection failed:', error);
+        });
+    }
 
-            if (response.ok) {
-                const data = await response.json();
-                return {
-                    needsRefresh: data.time_remaining_seconds <= 60 && data.time_remaining_seconds > 0,
-                    timeRemaining: data.time_remaining_seconds
-                };
-            }
-        } catch (error) {
-            console.error('Error checking auto-refresh status:', error);
-        }
-
-        return { needsRefresh: false, timeRemaining: 0 };
+    // Check if WebSocket is connected
+    isWebSocketConnected(): boolean {
+        return wsTokenManager.getConnected();
     }
 
     // Logout user and call backend logout endpoint
     async logout(): Promise<void> {
+        console.log('🚪 Starting logout process...');
         try {
             const token = this.getToken();
             if (token) {
+                console.log('📡 Calling backend logout endpoint...');
                 await fetch(`${this.apiBaseUrl}/auth/logout`, {
                     method: 'POST',
                     headers: {
@@ -300,11 +166,14 @@ class TokenManager {
                         'Content-Type': 'application/json'
                     }
                 });
+                console.log('✅ Backend logout successful');
             }
         } catch (error) {
-            console.error('Error calling logout endpoint:', error);
+            console.error('❌ Error calling logout endpoint:', error);
         } finally {
+            console.log('🔌 Disconnecting WebSocket and clearing auth data...');
             this.clearAuth();
+            console.log('✅ Logout process complete');
         }
     }
 
