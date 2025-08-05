@@ -73,6 +73,97 @@ class DatabaseService:
                 )
             """)
             
+            # Create refresh tokens table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS refresh_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    refresh_token TEXT UNIQUE NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    is_revoked BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """)
+            
+            # Create workflows table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS workflows (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    steps TEXT NOT NULL,  -- JSON string of workflow steps
+                    script_type TEXT,     -- Type of script (sh, playbook, terraform, aws, etc.)
+                    script_content TEXT,  -- The actual script/code content
+                    script_filename TEXT, -- Original filename
+                    run_command TEXT,     -- Command to run the script
+                    dependencies TEXT,    -- JSON string of dependencies
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """)
+            
+            # Create script executions table for tracking execution history
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS script_executions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    execution_id TEXT UNIQUE NOT NULL,
+                    workflow_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    status TEXT NOT NULL,  -- running, completed, failed
+                    output TEXT,
+                    error TEXT,
+                    exit_code INTEGER,
+                    execution_time REAL,   -- Execution time in seconds
+                    parameters TEXT,       -- JSON string of parameters
+                    environment TEXT,      -- JSON string of environment variables
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows (id),
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """)
+            
+            # Create user groups table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS user_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create user permissions table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS user_permissions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    permission_level TEXT NOT NULL CHECK (permission_level IN ('admin', 'manager', 'viewer')),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    UNIQUE(user_id)
+                )
+            """)
+            
+            # Create user group assignments table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS user_group_assignments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    group_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    FOREIGN KEY (group_id) REFERENCES user_groups (id),
+                    UNIQUE(user_id, group_id)
+                )
+            """)
+            
             logger.info("Database tables created successfully")
         except Exception as e:
             logger.error(f"Failed to create tables: {e}")

@@ -1,0 +1,286 @@
+/* AdminProfilePage Styles */
+.admin-profile-container {
+  max-width: 600px;
+  margin: 50px auto;
+  background: #fff;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.05);
+  position: relative;
+}
+
+.admin-profile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.admin-profile-header h1 {
+  margin: 0;
+  color: #333;
+}
+
+.logout-button {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.logout-button:hover {
+  background: #c82333;
+}
+
+.back-button {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 18px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  z-index: 2000;
+}
+
+.back-button:hover {
+  background: #e9ecef;
+}
+
+.profile-section {
+  margin-bottom: 2rem;
+}
+
+.profile-section h2 {
+  margin-bottom: 1rem;
+  color: #333;
+}
+
+.profile-info {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 5px;
+  margin-top: 1rem;
+}
+
+.info-row {
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.info-row strong {
+  min-width: 80px;
+}
+
+.username-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.username-input {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.edit-button {
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.95em;
+}
+
+.save-button {
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+
+.cancel-button {
+  background: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+
+.error-message {
+  color: red;
+  margin-bottom: 0.5rem;
+}
+
+.action-section {
+  margin-bottom: 2rem;
+}
+
+.action-section h3 {
+  margin-bottom: 1rem;
+  color: #333;
+}
+
+.action-form {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 5px;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+}
+
+.submit-button {
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  margin-top: 1rem;
+}
+
+.submit-button:hover {
+  background: #0056b3;
+}
+
+.submit-button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+.danger-button {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  margin-top: 1rem;
+}
+
+.danger-button:hover {
+  background: #c82333;
+}
+
+.danger-button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+.message {
+  margin-top: 1rem;
+  text-align: center;
+  padding: 1rem;
+  border-radius: 4px;
+}
+
+.success-message {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.error-message {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  max-width: 400px;
+  text-align: center;
+}
+
+.modal h3 {
+  margin: 0 0 1rem 0;
+  color: #e74c3c;
+}
+
+.modal p {
+  margin: 0 0 1.5rem 0;
+  color: #666;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.modal-button {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.modal-button.confirm {
+  background: #e74c3c;
+  color: white;
+}
+
+.modal-button.cancel {
+  background: #6c757d;
+  color: white;
+} 

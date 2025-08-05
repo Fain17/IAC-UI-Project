@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { checkFirstUser } from '../api';
+import { checkFirstUser } from '../../api';
+import tokenManager from '../../utils/tokenManager';
+import './RegisterPage.css';
 
 const RegisterPage: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -22,7 +24,7 @@ const RegisterPage: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (localStorage.getItem('token')) {
+    if (tokenManager.getToken()) {
       navigate('/home', { replace: true });
     }
   }, [navigate]);
@@ -123,7 +125,6 @@ const RegisterPage: React.FC = () => {
       setSuccess(true);
       setTimeout(() => {
         setSuccess(false);
-        localStorage.clear();
         navigate('/login');
       }, 3000);
     } catch (err: any) {
@@ -134,7 +135,7 @@ const RegisterPage: React.FC = () => {
 
   if (checkingFirstUser) {
     return (
-      <div style={{ maxWidth: 400, margin: '50px auto', background: '#fff', padding: '2rem', borderRadius: 8, boxShadow: '0 0 10px rgba(0,0,0,0.05)' }}>
+      <div className="register-container">
         <h1>Register</h1>
         <div style={{ textAlign: 'center', padding: '2rem' }}>
           <div>Loading...</div>
@@ -144,21 +145,15 @@ const RegisterPage: React.FC = () => {
   }
 
   return (
-    <div style={{ maxWidth: 400, margin: '50px auto', background: '#fff', padding: '2rem', borderRadius: 8, boxShadow: '0 0 10px rgba(0,0,0,0.05)' }}>
+    <div className="register-container">
       <h1>Register</h1>
       {isFirstUser && (
-        <div style={{ 
-          background: '#d4edda', 
-          color: '#155724', 
-          padding: '1rem', 
-          borderRadius: '5px', 
-          marginBottom: '1rem',
-          border: '1px solid #c3e6cb'
-        }}>
+        <div className="first-user-banner">
           <strong>🎉 Welcome!</strong> You're the first user to register. You'll be automatically granted admin privileges.
         </div>
       )}
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="register-form">
+        <div className="form-group">
         <label htmlFor="username">Username</label>
         <input
           id="username"
@@ -169,10 +164,12 @@ const RegisterPage: React.FC = () => {
           placeholder="Enter your username"
           required
         />
-        {checkingUsername && <span style={{ color: '#888', fontSize: '0.95em' }}>Checking...</span>}
-        {usernameAvailable === false && <span style={{ color: 'red', fontSize: '0.95em' }}>Username is taken</span>}
-        {usernameAvailable === true && <span style={{ color: 'green', fontSize: '0.95em' }}>Username is available</span>}
+          {checkingUsername && <span className="availability-status checking">Checking...</span>}
+          {usernameAvailable === false && <span className="availability-status unavailable">Username is taken</span>}
+          {usernameAvailable === true && <span className="availability-status available">Username is available</span>}
+        </div>
 
+        <div className="form-group">
         <label htmlFor="email">Email</label>
         <input
           id="email"
@@ -183,10 +180,12 @@ const RegisterPage: React.FC = () => {
           placeholder="Enter your email"
           required
         />
-        {checkingEmail && <span style={{ color: '#888', fontSize: '0.95em' }}>Checking...</span>}
-        {emailAvailable === false && <span style={{ color: 'red', fontSize: '0.95em' }}>Email is taken</span>}
-        {emailAvailable === true && <span style={{ color: 'green', fontSize: '0.95em' }}>Email is available</span>}
+          {checkingEmail && <span className="availability-status checking">Checking...</span>}
+          {emailAvailable === false && <span className="availability-status unavailable">Email is taken</span>}
+          {emailAvailable === true && <span className="availability-status available">Email is available</span>}
+        </div>
 
+        <div className="form-group">
         <label htmlFor="password">Password</label>
         <input
           id="password"
@@ -197,6 +196,9 @@ const RegisterPage: React.FC = () => {
           placeholder="Enter your password"
           required
         />
+        </div>
+
+        <div className="form-group">
         <label htmlFor="confirmPassword">Confirm Password</label>
         <input
           id="confirmPassword"
@@ -207,26 +209,19 @@ const RegisterPage: React.FC = () => {
           placeholder="Confirm your password"
           required
         />
-        <button type="submit" disabled={isLoading}>
+        </div>
+
+        <button type="submit" disabled={isLoading} className="submit-button">
           {isLoading ? 'Creating account...' : 'Register'}
         </button>
-        {error && <div style={{ color: 'red', marginTop: '1rem' }}>{error}</div>}
+        {error && <div className="error-message">{error}</div>}
       </form>
-      <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-        <span>Already have an account? </span>
-        <Link to="/login" style={{ color: '#007bff', textDecoration: 'none' }}>Login</Link>
+      <div className="links-container">
+        <span>Already have an account?</span>
+        <Link to="/login" className="link">Login</Link>
       </div>
       {success && (
-        <div style={{
-          marginTop: '2rem',
-          background: '#d4edda',
-          color: '#155724',
-          border: '1px solid #c3e6cb',
-          borderRadius: '5px',
-          padding: '1rem',
-          textAlign: 'center',
-          fontWeight: 500
-        }}>
+        <div className="success-message">
           Registered successfully! Redirecting to login...
         </div>
       )}

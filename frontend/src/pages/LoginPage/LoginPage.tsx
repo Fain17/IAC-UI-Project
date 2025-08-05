@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import tokenManager from '../../utils/tokenManager';
+import './LoginPage.css';
 
 const LoginPage: React.FC = () => {
   const [usernameOrEmail, setUsernameOrEmail] = useState('');
@@ -10,7 +12,7 @@ const LoginPage: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (localStorage.getItem('token')) {
+    if (tokenManager.getToken()) {
       navigate('/home', { replace: true });
     }
   }, [navigate]);
@@ -26,14 +28,28 @@ const LoginPage: React.FC = () => {
         password
       });
       
-      // Store token and user info from response
-      localStorage.setItem('token', response.data.access_token);
-      localStorage.setItem('userEmail', response.data.user.email);
-      
-      // Store admin status if provided by backend
-      if (response.data.user) {
-        localStorage.setItem('username', response.data.user.username || '');
-        localStorage.setItem('isAdmin', (!!response.data.user.is_admin).toString());
+      // Store tokens and user data using TokenManager
+      // This will automatically establish WebSocket connection
+      if (response.data.refresh_token) {
+        tokenManager.setTokens(
+          response.data.access_token,
+          response.data.refresh_token,
+          {
+            username: response.data.user.username,
+            email: response.data.user.email,
+            isAdmin: !!response.data.user.is_admin
+          }
+        );
+      } else {
+        // Fallback for backward compatibility
+        tokenManager.setToken(
+          response.data.access_token,
+          {
+            username: response.data.user.username,
+            email: response.data.user.email,
+            isAdmin: !!response.data.user.is_admin
+          }
+        );
       }
       
       setIsLoading(false);
@@ -45,9 +61,10 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth: 400, margin: '50px auto', background: '#fff', padding: '2rem', borderRadius: 8, boxShadow: '0 0 10px rgba(0,0,0,0.05)' }}>
+    <div className="login-container">
       <h1>Login</h1>
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="login-form">
+        <div className="form-group">
         <label htmlFor="usernameOrEmail">Username or Email</label>
         <input
           id="usernameOrEmail"
@@ -57,6 +74,8 @@ const LoginPage: React.FC = () => {
           placeholder="Enter your username or email"
           required
         />
+        </div>
+        <div className="form-group">
         <label htmlFor="password">Password</label>
         <input
           id="password"
@@ -66,14 +85,18 @@ const LoginPage: React.FC = () => {
           placeholder="Enter your password"
           required
         />
-        <button type="submit" disabled={isLoading}>
+        </div>
+        <button type="submit" disabled={isLoading} className="submit-button">
           {isLoading ? 'Logging in...' : 'Login'}
         </button>
-        {error && <div style={{ color: 'red', marginTop: '1rem' }}>{error}</div>}
+        {error && <div className="error-message">{error}</div>}
       </form>
-      <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-        <span>Don't have an account? </span>
-        <Link to="/register" style={{ color: '#007bff', textDecoration: 'none' }}>Register</Link>
+      <div className="links-container">
+        <span>Don't have an account?</span>
+        <Link to="/register" className="link">Register</Link>
+      </div>
+      <div className="links-container">
+        <Link to="/forgot-password" className="link">Forgot Password?</Link>
       </div>
     </div>
   );
