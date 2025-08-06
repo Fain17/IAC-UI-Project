@@ -128,7 +128,23 @@ const RegisterPage: React.FC = () => {
         navigate('/login');
       }, 3000);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed');
+      console.error('Registration error:', err);
+      
+      // Extract error message from backend response
+      let errorMessage = 'Registration failed';
+      
+      if (err.response?.data?.detail) {
+        // Use the detail message from the backend
+        errorMessage = err.response.data.detail;
+      } else if (err.response?.data?.message) {
+        // Fallback to message field
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        // Fallback to error message
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
       setIsLoading(false);
     }
   };

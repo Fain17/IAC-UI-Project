@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import tokenManager from '../../utils/tokenManager';
-import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequest, AdminUsersResponse, updateUserPermissions as updateUserPermissionsAPI, UpdateUserPermissionsRequest, deleteUser, updateUserActiveStatus } from '../../api';
+import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequest, AdminUsersResponse, updateUserPermissions as updateUserPermissionsAPI, UpdateUserPermissionsRequest, deleteUser, updateUserActiveStatus, getAllUsersPermissionsNew } from '../../api';
 import './SettingsPage.css';
 
 interface User {
@@ -14,6 +14,17 @@ interface User {
   updated_at: string;
   permission_level: string;
   groups: string[];
+}
+
+interface UserPermission {
+  user_id: number;
+  username: string;
+  email: string;
+  is_active: boolean;
+  is_admin: boolean;
+  permission_level: string;
+  permission_created_at: string;
+  permission_updated_at: string;
 }
 
 interface UserGroup {
@@ -74,16 +85,45 @@ const SettingsPage: React.FC = () => {
   // Load users function with useCallback to prevent infinite re-renders
   const loadUsers = useCallback(async () => {
     setLoading(true);
-    setMessage(null); // Clear any previous messages
+    setMessage(null);
     try {
-      console.log('🔄 Loading users...');
-      const response = await getAdminUsers();
-      console.log('✅ Users response:', response);
+      console.log('🔄 Loading users from /admin/users...');
+      const usersResponse = await getAdminUsers();
+      console.log('✅ Users response:', usersResponse);
       
       // Handle the actual API response structure
-      const usersData = response.data.users || response.data || [];
+      const usersData = usersResponse.data.users || usersResponse.data || [];
       console.log('📋 Users data:', usersData);
-      setUsers(usersData);
+      
+      // Get all users' permissions in a single call
+      console.log('🔄 Loading all users permissions from /admin/users/permissions/all...');
+      const permissionsResponse = await getAllUsersPermissionsNew();
+      console.log('✅ Permissions response:', permissionsResponse);
+      
+      const allPermissions = permissionsResponse.data.user_permissions || [];
+      console.log('📋 All permissions data:', allPermissions);
+      
+      // Create a map of user ID to permissions for quick lookup
+      const permissionsMap = new Map(
+        allPermissions.map((perm: UserPermission) => [perm.user_id, perm])
+      );
+      
+      // Merge users with their permissions
+      const usersWithPermissions = usersData.map((user: User) => {
+        const userPermissions = permissionsMap.get(user.id);
+        if (userPermissions) {
+          return {
+            ...user,
+            permission_level: userPermissions.permission_level || 'viewer',
+            is_active: userPermissions.is_active !== undefined ? userPermissions.is_active : user.is_active,
+            is_admin: userPermissions.is_admin !== undefined ? userPermissions.is_admin : user.is_admin
+          };
+        }
+        return user;
+      });
+      
+      console.log('👥 Users with permissions:', usersWithPermissions);
+      setUsers(usersWithPermissions);
     } catch (error: any) {
       console.error('❌ Error loading users:', error);
       console.error('❌ Error response:', error.response);
@@ -508,7 +548,10 @@ const SettingsPage: React.FC = () => {
                           <td>{user.username}</td>
                           <td>{user.email}</td>
                           <td><span className={`permission-badge ${user.is_admin ? 'admin' : (user.permission_level || 'viewer').toLowerCase()}`}>
-                            {user.is_admin ? 'admin' : (user.permission_level || 'viewer')}
+                            {user.is_admin ? 'Admin' : 
+                             user.permission_level === 'manager' ? 'Manager' : 
+                             user.permission_level === 'viewer' ? 'Viewer' : 
+                             user.permission_level || 'User'}
                           </span></td>
                           <td>{user.groups && user.groups.length > 0 ? user.groups.join(', ') : 'No groups'}</td>
                           <td>

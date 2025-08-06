@@ -35,6 +35,7 @@ const LoginPage: React.FC = () => {
           response.data.access_token,
           response.data.refresh_token,
           {
+            id: response.data.user.id,
             username: response.data.user.username,
             email: response.data.user.email,
             isAdmin: !!response.data.user.is_admin
@@ -45,6 +46,7 @@ const LoginPage: React.FC = () => {
         tokenManager.setToken(
           response.data.access_token,
           {
+            id: response.data.user.id,
             username: response.data.user.username,
             email: response.data.user.email,
             isAdmin: !!response.data.user.is_admin
@@ -55,7 +57,23 @@ const LoginPage: React.FC = () => {
       setIsLoading(false);
       navigate('/home');
     } catch (err: any) {
-      setError('Invalid credentials or server error');
+      console.error('Login error:', err);
+      
+      // Extract error message from backend response
+      let errorMessage = 'Invalid credentials or server error';
+      
+      if (err.response?.data?.detail) {
+        // Use the detail message from the backend
+        errorMessage = err.response.data.detail;
+      } else if (err.response?.data?.message) {
+        // Fallback to message field
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        // Fallback to error message
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
       setIsLoading(false);
     }
   };

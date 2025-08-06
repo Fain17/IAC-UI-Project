@@ -36,7 +36,23 @@ const ResetPasswordPage: React.FC = () => {
         navigate('/login');
       }, 3000);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to reset password.');
+      console.error('Reset password error:', err);
+      
+      // Extract error message from backend response
+      let errorMessage = 'Failed to reset password.';
+      
+      if (err.response?.data?.detail) {
+        // Use the detail message from the backend
+        errorMessage = err.response.data.detail;
+      } else if (err.response?.data?.message) {
+        // Fallback to message field
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        // Fallback to error message
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

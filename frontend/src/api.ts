@@ -187,5 +187,34 @@ export interface UpdateUserActiveStatusRequest {
 export const updateUserActiveStatus = (userId: number, isActive: boolean): Promise<AxiosResponse<AdminUser>> => 
   API.patch(`/admin/users/${userId}/active-status`, { is_active: isActive });
 
+export const getUserPermissions = (userId: number): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> => 
+  API.get(`/admin/users/${userId}/permissions`);
+
+export const getCurrentUserPermissions = (): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> => 
+  API.get('/settings/permissions');
+
+export const getAllUsersPermissions = (): Promise<AxiosResponse<{ users: Array<{ id: number; username: string; email: string; permission_level: string; is_active: boolean; is_admin: boolean }> }>> => 
+  API.get('/settings/permissions');
+
+export const getAllUsersPermissionsNew = (): Promise<AxiosResponse<{ 
+  user_permissions: Array<{ 
+    user_id: number; 
+    username: string; 
+    email: string; 
+    is_active: boolean; 
+    is_admin: boolean; 
+    permission_level: string; 
+    permission_created_at: string; 
+    permission_updated_at: string; 
+  }>; 
+  count: number; 
+  permission_summary: { 
+    admin: number; 
+    manager: number; 
+    viewer: number; 
+  }; 
+}>> => 
+  API.get('/admin/users/permissions/all');
+
 export const deleteUser = (userId: number): Promise<AxiosResponse> => 
   API.delete(`/admin/users/${userId}`); 

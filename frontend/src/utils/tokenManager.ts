@@ -1,6 +1,7 @@
 import wsTokenManager from './websocketTokenManager';
 
 interface UserData {
+    id?: number;
     username?: string;
     email?: string;
     isAdmin?: boolean;
@@ -25,8 +26,10 @@ class TokenManager {
         localStorage.setItem(this.refreshTokenKey, refreshToken);
         localStorage.setItem(this.userKey, JSON.stringify(userData));
         
-        // Connect WebSocket for token monitoring
-        wsTokenManager.connect(accessToken);
+        // Connect WebSocket for token monitoring only if not already connected
+        if (!wsTokenManager.getConnected()) {
+            wsTokenManager.connect(accessToken);
+        }
     }
 
     // Store token and user data (backward compatibility)
@@ -34,8 +37,10 @@ class TokenManager {
         localStorage.setItem(this.tokenKey, token);
         localStorage.setItem(this.userKey, JSON.stringify(userData));
         
-        // Connect WebSocket for token monitoring
-        wsTokenManager.connect(token);
+        // Connect WebSocket for token monitoring only if not already connected
+        if (!wsTokenManager.getConnected()) {
+            wsTokenManager.connect(token);
+        }
     }
 
     // Get stored access token
@@ -141,10 +146,15 @@ class TokenManager {
             return;
         }
 
-        console.log('🔌 Attempting WebSocket connection for token monitoring...');
-        wsTokenManager.connect(token).catch(error => {
-            console.warn('⚠️ WebSocket connection failed:', error);
-        });
+        // Only connect if not already connected
+        if (!wsTokenManager.getConnected()) {
+            console.log('🔌 Attempting WebSocket connection for token monitoring...');
+            wsTokenManager.connect(token).catch(error => {
+                console.warn('⚠️ WebSocket connection failed:', error);
+            });
+        } else {
+            console.log('🔌 WebSocket already connected, skipping connection attempt');
+        }
     }
 
     // Check if WebSocket is connected
