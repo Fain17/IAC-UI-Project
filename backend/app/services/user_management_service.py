@@ -118,10 +118,19 @@ async def update_user_permissions(user_id: int, permission_level: str = None, is
             if permission_level not in ["admin", "manager", "viewer"]:
                 return {"success": False, "error": "Invalid permission level. Must be admin, manager, or viewer"}
             
-            # Update permission
-            success = await UserPermissionRepository.update(user_id, permission_level)
-            if not success:
-                return {"success": False, "error": "Failed to update user permission"}
+            # Check if permission record exists
+            existing_permission = await UserPermissionRepository.get_by_user_id(user_id)
+            
+            if existing_permission:
+                # Update existing permission
+                success = await UserPermissionRepository.update(user_id, permission_level)
+                if not success:
+                    return {"success": False, "error": "Failed to update user permission"}
+            else:
+                # Create new permission record
+                permission_id = await UserPermissionRepository.create(user_id, permission_level)
+                if not permission_id:
+                    return {"success": False, "error": "Failed to create user permission"}
         
         return {
             "success": True,
@@ -294,4 +303,79 @@ async def remove_user_from_group(user_id: int, group_id: int) -> Dict:
             
     except Exception as e:
         logger.error(f"Error removing user from group: {e}")
-        return {"success": False, "error": "Internal server error"} 
+        return {"success": False, "error": "Internal server error"}
+
+async def get_all_user_permissions() -> List[Dict]:
+    """
+    Get all user permissions efficiently (admin only).
+    Returns list of user permissions with user details.
+    """
+    try:
+        # Get all users first
+        users = await get_all_users()
+        
+        # Get permissions for each user
+        user_permissions = []
+        for user in users:
+            permissions = await get_user_permissions(user["id"])
+            
+            user_permission_data = {
+                "user_id": user["id"],
+                "username": user["username"],
+                "email": user["email"],
+                "is_active": user["is_active"],
+                "is_admin": user["is_admin"],
+                "permission_level": permissions["permission_level"] if permissions else "viewer",
+                "permission_created_at": permissions["created_at"] if permissions else None,
+                "permission_updated_at": permissions["updated_at"] if permissions else None
+            }
+            user_permissions.append(user_permission_data)
+        
+        return user_permissions
+        
+    except Exception as e:
+        logger.error(f"Error getting all user permissions: {e}")
+        return []
+
+async def create_user_group(name: str, description: str = None) -> Dict:
+    """
+    Create a new user group (admin only).
+    Returns dict with success status and group ID or error message.
+    """
+    try:
+        if not name or not name.strip():
+            return {"success": False, "error": "Group name is required"}
+        
+        # Check if group name already exists
+        existing_groups = await UserGroupRepository.get_all()
+        for group in existing_groups:
+            if group["name"].lower() == name.strip().lower():
+                return {"success": False, "error": "Group name already exists"}
+        
+        # Create the group
+        group_id = await UserGroupRepository.create(name.strip(), description)
+        
+        if group_id:
+            return {
+                "success": True,
+                "group_id": group_id,
+                "message": f"Group '{name}' created successfully"
+            }
+        else:
+            return {"success": False, "error": "Failed to create group"}
+            
+    except Exception as e:
+        logger.error(f"Error creating user group: {e}")
+        return {"success": False, "error": "Internal server error"}
+
+async def get_all_user_groups() -> List[Dict]:
+    """
+    Get all user groups (admin only).
+    Returns list of all groups in the system.
+    """
+    try:
+        groups = await UserGroupRepository.get_all()
+        return groups
+    except Exception as e:
+        logger.error(f"Error getting all user groups: {e}")
+        return [] 

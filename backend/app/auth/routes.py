@@ -89,6 +89,10 @@ async def login(user_data: UserLogin):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
+    # Check if user is inactive
+    if isinstance(user, dict) and user.get("error") == "inactive_user":
+        raise HTTPException(status_code=401, detail="Account is inactive - please contact an administrator")
+    
     # Create both access and refresh tokens
     tokens = await auth_service.login_user(user)
     

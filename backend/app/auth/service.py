@@ -162,6 +162,11 @@ class AuthService:
         if not user:
             return None
         
+        # Check if user is active
+        if not user.get("is_active", True):
+            logger.warning(f"Refresh token attempt for inactive user {user_id}")
+            return None
+        
         # Create new access token (short-lived)
         new_access_token = await self.create_access_token(
             data={"sub": str(user_id)},
@@ -265,13 +270,19 @@ class AuthService:
     async def authenticate_user(self, username: str, password: str) -> Optional[dict]:
         """Authenticate a user and return user data if successful."""
         try:
-            user = await UserRepository.get_by_username(username)
+            # First check if user exists (including inactive)
+            user = await UserRepository.get_by_username_including_inactive(username)
             
             if not user:
-                return None
+                return None  # User doesn't exist
             
+            # Check if user is inactive
+            if not user.get("is_active", True):
+                return {"error": "inactive_user"}  # Special error for inactive users
+            
+            # Check password
             if not self.verify_password(password, user["hashed_password"]):
-                return None
+                return None  # Invalid password
             
             return {
                 "id": user["id"],
@@ -287,13 +298,19 @@ class AuthService:
     async def authenticate_user_by_email(self, email: str, password: str) -> Optional[dict]:
         """Authenticate a user by email and return user data if successful."""
         try:
-            user = await UserRepository.get_by_email(email)
+            # First check if user exists (including inactive)
+            user = await UserRepository.get_by_email_including_inactive(email)
             
             if not user:
-                return None
+                return None  # User doesn't exist
             
+            # Check if user is inactive
+            if not user.get("is_active", True):
+                return {"error": "inactive_user"}  # Special error for inactive users
+            
+            # Check password
             if not self.verify_password(password, user["hashed_password"]):
-                return None
+                return None  # Invalid password
             
             return {
                 "id": user["id"],

@@ -117,7 +117,7 @@ class UserRepository:
             return None
         try:
             result = await db_service.client.execute(
-                "SELECT id, username, email, is_active, is_admin FROM users WHERE id = ? AND is_active = TRUE",
+                "SELECT id, username, email, is_active, is_admin FROM users WHERE id = ?",
                 [user_id]
             )
             
@@ -164,6 +164,33 @@ class UserRepository:
             return None
 
     @staticmethod
+    async def get_by_username_including_inactive(username: str) -> Optional[Dict]:
+        """Get user by username, including inactive users."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, username, email, hashed_password, is_active, is_admin FROM users WHERE username = ?",
+                [username]
+            )
+            
+            if not result.rows:
+                return None
+            
+            user = result.rows[0]
+            return {
+                "id": user[0],
+                "username": user[1],
+                "email": user[2],
+                "hashed_password": user[3],
+                "is_active": user[4],
+                "is_admin": user[5]
+            }
+        except Exception as e:
+            logger.error(f"Error getting user by username (including inactive): {e}")
+            return None
+
+    @staticmethod
     async def get_by_email(email: str) -> Optional[Dict]:
         """Get user by email."""
         if not db_service.client:
@@ -188,6 +215,33 @@ class UserRepository:
             }
         except Exception as e:
             logger.error(f"Error getting user by email: {e}")
+            return None
+
+    @staticmethod
+    async def get_by_email_including_inactive(email: str) -> Optional[Dict]:
+        """Get user by email, including inactive users."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, username, email, hashed_password, is_active, is_admin FROM users WHERE email = ?",
+                [email]
+            )
+            
+            if not result.rows:
+                return None
+            
+            user = result.rows[0]
+            return {
+                "id": user[0],
+                "username": user[1],
+                "email": user[2],
+                "hashed_password": user[3],
+                "is_active": user[4],
+                "is_admin": user[5]
+            }
+        except Exception as e:
+            logger.error(f"Error getting user by email (including inactive): {e}")
             return None
     
     @staticmethod
@@ -793,13 +847,17 @@ class UserPermissionRepository:
     async def create(user_id: int, permission_level: str) -> Optional[int]:
         """Create a new user permission and return its ID."""
         if not db_service.client:
+            logger.error("Database client not initialized")
             return None
         try:
+            logger.info(f"Creating permission for user {user_id} with level {permission_level}")
             result = await db_service.client.execute(
                 "INSERT INTO user_permissions (user_id, permission_level) VALUES (?, ?) RETURNING id",
                 [user_id, permission_level]
             )
-            return result.rows[0][0] if result.rows else None
+            permission_id = result.rows[0][0] if result.rows else None
+            logger.info(f"Created permission with ID: {permission_id}")
+            return permission_id
         except Exception as e:
             logger.error(f"Error creating user permission: {e}")
             return None
@@ -834,12 +892,15 @@ class UserPermissionRepository:
     async def update(user_id: int, permission_level: str) -> bool:
         """Update user permission."""
         if not db_service.client:
+            logger.error("Database client not initialized")
             return False
         try:
+            logger.info(f"Updating permission for user {user_id} to {permission_level}")
             result = await db_service.client.execute(
                 "UPDATE user_permissions SET permission_level = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
                 [permission_level, user_id]
             )
+            logger.info(f"Update result: rows_affected={result.rows_affected}")
             return result.rows_affected > 0
         except Exception as e:
             logger.error(f"Error updating user permission: {e}")
@@ -859,6 +920,37 @@ class UserPermissionRepository:
         except Exception as e:
             logger.error(f"Error deleting user permission: {e}")
             return False
+
+    @staticmethod
+    async def get_all() -> List[Dict]:
+        """Get all user permissions."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT up.user_id, up.permission_level, up.created_at, up.updated_at,
+                       u.username, u.email, u.is_active, u.is_admin
+                FROM user_permissions up
+                JOIN users u ON up.user_id = u.id
+                ORDER BY u.username
+            """)
+            
+            permissions = []
+            for row in result.rows:
+                permissions.append({
+                    "user_id": row[0],
+                    "permission_level": row[1],
+                    "created_at": row[2],
+                    "updated_at": row[3],
+                    "username": row[4],
+                    "email": row[5],
+                    "is_active": bool(row[6]),
+                    "is_admin": bool(row[7])
+                })
+            return permissions
+        except Exception as e:
+            logger.error(f"Error getting all user permissions: {e}")
+            return []
 
 class UserGroupAssignmentRepository:
     """Repository for user group assignment operations."""
