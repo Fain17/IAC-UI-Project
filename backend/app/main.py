@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import home_router, settings_router, workflow_router, file_router
+from app.routes import home_router, settings_router, workflow_router, file_router, execution_router
 from app.routes.admin_routes import router as admin_router
 from app.routes.websocket_routes import router as websocket_router
 from app.auth import auth_router
@@ -27,6 +27,7 @@ app.include_router(home_router)
 app.include_router(settings_router)
 app.include_router(workflow_router)
 app.include_router(file_router)
+app.include_router(execution_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(websocket_router)
