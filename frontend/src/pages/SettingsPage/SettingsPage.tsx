@@ -755,7 +755,6 @@ const SettingsPage: React.FC = () => {
         <h2>Navigation</h2>
         <Link to="/home" className="nav-link">Home</Link>
         <Link to="/settings" className="nav-link active">Settings</Link>
-        <Link to="/workflows" className="nav-link">Workflows</Link>
         
         <div className="settings-submenu">
           <div className="submenu-header">Settings</div>

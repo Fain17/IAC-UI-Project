@@ -1,18 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { getMappings, createMapping, deleteMapping, runLaunchUpdate } from '../../api';
-import AddMappingForm from '../../components/AddMappingForm';
-import MappingList from '../../components/MappingList';
-import LaunchRunner from '../../components/LaunchRunner';
 import tokenManager from '../../utils/tokenManager';
 import './HomePage.css';
 
-export interface Mappings {
-  [key: string]: string;
-}
-
 const HomePage: React.FC = () => {
-  const [mappings, setMappings] = useState<Mappings>({});
   const navigate = useNavigate();
   const [username, setUsername] = useState<string>('');
   const [email, setEmail] = useState<string>('');
@@ -24,30 +15,6 @@ const HomePage: React.FC = () => {
       setEmail(user.email || '');
     }
   }, []);
-
-  const fetchMappings = async () => {
-    const res = await getMappings();
-    setMappings(res.data.mappings);
-  };
-
-  useEffect(() => {
-    fetchMappings();
-  }, []);
-
-  const handleCreate = async (instance: string, lt: string) => {
-    await createMapping(instance, lt);
-    fetchMappings();
-  };
-
-  const handleDelete = async (instance: string) => {
-    await deleteMapping(instance);
-    fetchMappings();
-  };
-
-  const handleRun = async (instance: string, launch_template: string) => {
-    const res = await runLaunchUpdate(instance, launch_template);
-    return res.data;
-  };
 
   const handleLogout = async () => {
     await tokenManager.logout();
@@ -66,8 +33,8 @@ const HomePage: React.FC = () => {
       <aside className="sidebar">
         <h2>Navigation</h2>
         <Link to="/home" className="nav-link active">Home</Link>
-        <Link to="/settings" className="nav-link">Settings</Link>
         <Link to="/workflows" className="nav-link">Workflows</Link>
+        <Link to="/settings" className="nav-link">Settings</Link>
         <button onClick={handleLogout} className="logout-button">
           Logout
         </button>
@@ -82,14 +49,29 @@ const HomePage: React.FC = () => {
           {username && <div className="name">{username}</div>}
           {email && <div className="email">{email}</div>}
         </div>
-        <h1>EC2 Launch Manager</h1>
-        <AddMappingForm onCreate={handleCreate} />
-        <MappingList mappings={mappings} onDelete={handleDelete} />
-        <hr />
-        <LaunchRunner mappings={mappings} onRun={handleRun} />
+        <div className="dashboard-content">
+          <h1>Welcome to the Dashboard</h1>
+          <div className="dashboard-cards">
+            <div className="dashboard-card">
+              <h3>🔄 Workflows</h3>
+              <p>Create and manage automated workflows</p>
+              <Link to="/workflows" className="card-link">Go to Workflows</Link>
+            </div>
+            <div className="dashboard-card">
+              <h3>👥 User Management</h3>
+              <p>Manage users, roles, and permissions</p>
+              <Link to="/settings" className="card-link">Go to Settings</Link>
+            </div>
+            <div className="dashboard-card">
+              <h3>👤 Profile</h3>
+              <p>View and edit your profile information</p>
+              <Link to="/admin-profile" className="card-link">View Profile</Link>
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   );
 };
 
-export default HomePage; 
+export default HomePage;
