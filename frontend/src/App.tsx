@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
+import WorkflowsPage from './pages/WorkflowsPage/WorkflowsPage';
+import WorkflowDetailsPage from './pages/WorkflowDetailsPage';
 import SettingsPage from './pages/SettingsPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AdminProfilePage from './pages/AdminProfilePage';
-import WorkflowsPage from './pages/WorkflowsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -50,6 +51,22 @@ const App: React.FC = () => {
           } 
         />
         <Route 
+          path="/workflows" 
+          element={
+            <ProtectedRoute>
+              <WorkflowsPage />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/workflows/:workflowId" 
+          element={
+            <ProtectedRoute>
+              <WorkflowDetailsPage />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
           path="/settings" 
           element={
             <ProtectedRoute>
@@ -62,14 +79,6 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <AdminProfilePage />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/workflows" 
-          element={
-            <ProtectedRoute>
-              <WorkflowsPage />
             </ProtectedRoute>
           } 
         />

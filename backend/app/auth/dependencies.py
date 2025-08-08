@@ -24,6 +24,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
     
+    # Check if user is active
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=401, detail="Inactive user - account has been deactivated")
+    
     return user
 
 def get_current_active_user(current_user: dict = Depends(get_current_user)) -> dict:
@@ -51,6 +55,11 @@ async def get_user_from_token_allow_expired(request: Request):
         user = await UserRepository.get_by_id(int(user_id))
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        
+        # Check if user is active
+        if not user.get("is_active", True):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user - account has been deactivated")
+        
         return user
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") 

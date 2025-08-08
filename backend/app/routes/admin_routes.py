@@ -3,10 +3,11 @@ from fastapi.responses import JSONResponse
 from app.services.user_management_service import (
     get_all_users, get_user_by_id, create_admin_user, 
     delete_admin_user, update_user_active_status, get_user_permissions, 
-    get_user_groups, assign_user_to_group, remove_user_from_group, update_user_permissions
+    get_user_groups, assign_user_to_group, remove_user_from_group, update_user_permissions,
+    get_all_user_permissions, create_user_group, get_all_user_groups
 )
-from app.auth.dependencies import get_current_admin_user
-from app.db.models import AdminUserCreate, AdminUserPermissionUpdate
+from app.auth.dependencies import get_current_admin_user, get_current_user
+from app.db.models import AdminUserCreate, AdminUserPermissionUpdate, UserGroupCreate
 from typing import List
 import logging
 
@@ -121,20 +122,31 @@ async def update_user_permissions_route(
         "is_active": false
     }
     """
-    # Prevent admin from deactivating themselves
-    if user_id == current_user["id"] and permission_data.is_active is False:
-        raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
-    
-    result = await update_user_permissions(
-        user_id=user_id,
-        permission_level=permission_data.permission_level,
-        is_active=permission_data.is_active
-    )
-    
-    if result["success"]:
-        return JSONResponse(result)
-    else:
-        raise HTTPException(status_code=400, detail=result["error"])
+    try:
+        # Prevent admin from deactivating themselves
+        if user_id == current_user["id"] and permission_data.is_active is False:
+            raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+        
+        # Log the update attempt
+        logger.info(f"Updating permissions for user {user_id}: permission_level={permission_data.permission_level}, is_active={permission_data.is_active}")
+        
+        result = await update_user_permissions(
+            user_id=user_id,
+            permission_level=permission_data.permission_level,
+            is_active=permission_data.is_active
+        )
+        
+        if result["success"]:
+            return JSONResponse(result)
+        else:
+            logger.error(f"Failed to update user permissions: {result['error']}")
+            raise HTTPException(status_code=400, detail=result["error"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in update_user_permissions_route: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/users/{user_id}", tags=["Admin"])
 async def delete_user_route(
@@ -181,19 +193,63 @@ async def update_user_active_status_route(
     else:
         raise HTTPException(status_code=400, detail=result["error"])
 
-@router.get("/users/{user_id}/permissions", tags=["Admin"])
-async def get_user_permissions_route(
-    user_id: int,
+@router.get("/users/permissions/all", tags=["Admin"])
+async def get_all_user_permissions_route(
     current_user: dict = Depends(get_current_admin_user)
 ):
     """
-    Get user permissions (admin only).
-    Returns the user's permission level.
+    Get all user permissions (admin only).
+    Returns a list of all users with their permission levels.
     """
+    try:
+        # Get all user permissions efficiently
+        user_permissions = await get_all_user_permissions()
+        
+        # Calculate permission summary
+        permission_summary = {
+            "admin": len([u for u in user_permissions if u["permission_level"] == "admin"]),
+            "manager": len([u for u in user_permissions if u["permission_level"] == "manager"]),
+            "viewer": len([u for u in user_permissions if u["permission_level"] == "viewer"])
+        }
+        
+        return JSONResponse({
+            "user_permissions": user_permissions,
+            "count": len(user_permissions),
+            "permission_summary": permission_summary
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting all user permissions: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/users/{user_id}/permissions", tags=["Admin"])
+async def get_user_permissions_route(
+    user_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get user permissions.
+    - Users can view their own permissions
+    - Admins can view any user's permissions
+    
+    This endpoint is useful for:
+    - Users checking their own permission level
+    - Admins managing user permissions
+    """
+    # Check if user is requesting their own permissions or is an admin
+    if current_user["id"] != user_id and not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="You can only view your own permissions")
+    
     permissions = await get_user_permissions(user_id)
     
     if not permissions:
-        raise HTTPException(status_code=404, detail="User permissions not found")
+        # Return default viewer permission if no permission record exists
+        return JSONResponse({
+            "user_id": user_id,
+            "permission_level": "viewer",
+            "created_at": None,
+            "updated_at": None
+        })
     
     return JSONResponse(permissions)
 
@@ -357,4 +413,43 @@ async def get_user_stats_route(current_user: dict = Depends(get_current_admin_us
         "inactive_users": inactive_users,
         "admin_users": admin_users,
         "permission_distribution": permission_stats
+    })
+
+# Group Management Endpoints
+@router.post("/groups", tags=["Admin"])
+async def create_group_route(
+    group_data: UserGroupCreate,
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Create a new user group (admin only).
+    
+    Example request body:
+    {
+        "name": "Developers",
+        "description": "Development team members"
+    }
+    """
+    result = await create_user_group(
+        name=group_data.name,
+        description=group_data.description
+    )
+    
+    if result["success"]:
+        return JSONResponse(result, status_code=201)
+    else:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+@router.get("/groups", tags=["Admin"])
+async def get_all_groups_route(
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Get all user groups (admin only).
+    Returns a list of all groups in the system.
+    """
+    groups = await get_all_user_groups()
+    return JSONResponse({
+        "groups": groups,
+        "count": len(groups)
     }) 

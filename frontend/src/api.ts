@@ -63,79 +63,7 @@ export const runLaunchUpdate = (instance: string, launch_template: string): Prom
 export const checkFirstUser = (): Promise<AxiosResponse> => 
   API.get('/auth/check-first-user');
 
-// Workflow API interfaces
-export interface WorkflowStep {
-  action: string;
-  target?: string;
-  [key: string]: any;
-}
-
-export interface WorkflowCreate {
-  name: string;
-  description?: string;
-  steps: WorkflowStep[];
-  is_active?: boolean;
-  script_type?: string;
-  script_content?: string;
-  script_filename?: string;
-  run_command?: string;
-  dependencies?: string[];
-}
-
-export interface WorkflowUpdate {
-  name?: string;
-  description?: string;
-  steps?: WorkflowStep[];
-  is_active?: boolean;
-  script_type?: string;
-  script_content?: string;
-  script_filename?: string;
-  run_command?: string;
-  dependencies?: string[];
-}
-
-export interface Workflow {
-  id: number;
-  name: string;
-  description?: string;
-  steps: WorkflowStep[];
-  is_active: boolean;
-  script_type?: string;
-  script_content?: string;
-  script_filename?: string;
-  run_command?: string;
-  dependencies?: string[];
-  created_at: string;
-  updated_at: string;
-  user_id: number;
-}
-
-// Workflow API functions
-export const getWorkflows = (): Promise<AxiosResponse<Workflow[]>> => 
-  API.get('/workflow/list');
-
-export const getWorkflow = (workflowId: number): Promise<AxiosResponse<Workflow>> => 
-  API.get(`/workflow/${workflowId}`);
-
-export const createWorkflow = (workflow: WorkflowCreate): Promise<AxiosResponse<Workflow>> => 
-  API.post('/workflow/create', workflow);
-
-export const updateWorkflow = (workflowId: number, workflow: WorkflowUpdate): Promise<AxiosResponse<Workflow>> => 
-  API.put(`/workflow/${workflowId}`, workflow);
-
-export const deleteWorkflow = (workflowId: number): Promise<AxiosResponse> => 
-  API.delete(`/workflow/${workflowId}`);
-
-export const executeWorkflow = (workflowId: number): Promise<AxiosResponse> => 
-  API.post(`/workflow/${workflowId}/execute`);
-
-export const getWorkflowExecutions = (workflowId: number): Promise<AxiosResponse> => 
-  API.get(`/workflow/${workflowId}/executions`);
-
-export const installWorkflowDependencies = (workflowId: number): Promise<AxiosResponse> => 
-  API.post(`/workflow/${workflowId}/install-dependencies`);
-
-// Admin User Management API interfaces
+// User Management Interfaces
 export interface AdminUser {
   id: number;
   username: string;
@@ -161,7 +89,6 @@ export interface CreateUserRequest {
   is_active?: boolean;
 }
 
-// Admin User Management API functions
 export const getAdminUsers = (): Promise<AxiosResponse<AdminUsersResponse>> => 
   API.get('/admin/users');
 
@@ -187,5 +114,193 @@ export interface UpdateUserActiveStatusRequest {
 export const updateUserActiveStatus = (userId: number, isActive: boolean): Promise<AxiosResponse<AdminUser>> => 
   API.patch(`/admin/users/${userId}/active-status`, { is_active: isActive });
 
+export const getUserPermissions = (userId: number): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> => 
+  API.get(`/admin/users/${userId}/permissions`);
+
+export const getCurrentUserPermissions = (): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> => 
+  API.get('/settings/permissions');
+
+export const getAllUsersPermissions = (): Promise<AxiosResponse<{ users: Array<{ id: number; username: string; email: string; permission_level: string; is_active: boolean; is_admin: boolean }> }>> => 
+  API.get('/settings/permissions');
+
+export const getAllUsersPermissionsNew = (): Promise<AxiosResponse<{ 
+  user_permissions: Array<{ 
+    user_id: number; 
+    username: string; 
+    email: string; 
+    is_active: boolean; 
+    is_admin: boolean; 
+    permission_level: string; 
+    permission_created_at: string; 
+    permission_updated_at: string; 
+  }>; 
+  count: number; 
+  permission_summary: { 
+    admin: number; 
+    manager: number; 
+    viewer: number; 
+  }; 
+}>> => 
+  API.get('/admin/users/permissions/all');
+
 export const deleteUser = (userId: number): Promise<AxiosResponse> => 
-  API.delete(`/admin/users/${userId}`); 
+  API.delete(`/admin/users/${userId}`);
+
+// Workflow Step Management APIs
+export interface WorkflowStep {
+  id: string;
+  name: string;
+  description?: string;
+  order: number;
+  script_type?: string;
+  script_filename?: string;
+  run_command?: string;
+  dependencies?: string[];
+  parameters?: Record<string, any>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  directory_name?: string;
+}
+
+export interface CreateStepRequest {
+  name: string;
+  description?: string;
+  order?: number;
+  script_type?: string;
+  script_filename?: string;
+  run_command?: string;
+  dependencies?: string[];
+  parameters?: Record<string, any>;
+  is_active?: boolean;
+}
+
+export interface UpdateStepRequest {
+  name?: string;
+  description?: string;
+  order?: number;
+  script_type?: string;
+  script_filename?: string;
+  run_command?: string;
+  dependencies?: string[];
+  parameters?: Record<string, any>;
+  is_active?: boolean;
+}
+
+export interface WorkflowStepsResponse {
+  success: boolean;
+  workflow_id: string;
+  workflow_name: string;
+  steps: WorkflowStep[];
+  total_steps: number;
+}
+
+export interface CreateStepResponse {
+  success: boolean;
+  message: string;
+  step: WorkflowStep;
+  total_steps: number;
+}
+
+export interface UpdateStepResponse {
+  success: boolean;
+  message: string;
+  updated_step: WorkflowStep;
+  total_steps: number;
+}
+
+export interface DeleteStepResponse {
+  success: boolean;
+  message: string;
+  deleted_step: WorkflowStep;
+  total_steps: number;
+}
+
+export interface ReorderStepsResponse {
+  success: boolean;
+  message: string;
+  steps: WorkflowStep[];
+  total_steps: number;
+}
+
+// Get workflow steps
+export const getWorkflowSteps = (workflowId: string): Promise<AxiosResponse<WorkflowStepsResponse>> =>
+  API.get(`/workflow/${workflowId}/steps`);
+
+// Add step to workflow
+export const addWorkflowStep = (workflowId: string, stepData: CreateStepRequest): Promise<AxiosResponse<CreateStepResponse>> =>
+  API.post(`/workflow/${workflowId}/steps`, stepData);
+
+// Update workflow step
+export const updateWorkflowStep = (workflowId: string, stepOrder: number, stepData: UpdateStepRequest): Promise<AxiosResponse<UpdateStepResponse>> =>
+  API.put(`/workflow/${workflowId}/steps/${stepOrder}`, stepData);
+
+// Update workflow step by ID
+export const updateWorkflowStepById = (workflowId: string, stepId: string, stepData: UpdateStepRequest): Promise<AxiosResponse<UpdateStepResponse>> =>
+  API.put(`/workflow/${workflowId}/steps/id/${stepId}`, stepData);
+
+// Delete workflow step
+export const deleteWorkflowStep = (workflowId: string, stepOrder: number): Promise<AxiosResponse<DeleteStepResponse>> =>
+  API.delete(`/workflow/${workflowId}/steps/${stepOrder}`);
+
+// Reorder workflow steps
+export const reorderWorkflowSteps = (workflowId: string, stepOrders: number[]): Promise<AxiosResponse<ReorderStepsResponse>> =>
+  API.put(`/workflow/${workflowId}/steps/reorder`, stepOrders);
+
+// File Management APIs
+export interface UploadFileResponse {
+  success: boolean;
+  message: string;
+  file_path: string;
+  file_size: number;
+  step_id: string;
+}
+
+export interface UploadZipResponse {
+  success: boolean;
+  message: string;
+  extracted_files: string[];
+  step_id: string;
+}
+
+export interface CreateScriptResponse {
+  success: boolean;
+  message: string;
+  file_path: string;
+  file_size: number;
+  step_id: string;
+}
+
+// Upload single file to step
+export const uploadFileToStep = (workflowId: string, stepId: string, file: File): Promise<AxiosResponse<UploadFileResponse>> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return API.post(`/workflow/${workflowId}/steps/${stepId}/upload-file`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+};
+
+// Upload ZIP file to step
+export const uploadZipToStep = (workflowId: string, stepId: string, zipFile: File): Promise<AxiosResponse<UploadZipResponse>> => {
+  const formData = new FormData();
+  formData.append('zip_file', zipFile);
+  return API.post(`/workflow/${workflowId}/steps/${stepId}/upload-zip`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+};
+
+// Create script for step
+export const createScriptForStep = (workflowId: string, stepId: string, filename: string, scriptContent: string): Promise<AxiosResponse<CreateScriptResponse>> => {
+  const formData = new URLSearchParams();
+  formData.append('filename', filename);
+  formData.append('script_content', scriptContent);
+  return API.post(`/workflow/${workflowId}/steps/${stepId}/create-script`, formData, {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+}; 

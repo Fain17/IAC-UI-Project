@@ -26,8 +26,24 @@ const ForgotPasswordPage: React.FC = () => {
       // If email exists, send reset link
       await axios.post('http://localhost:8000/auth/request-password-reset', { email });
       setMessage('A password reset link has been sent.');
-    } catch {
-      setError('Failed to send reset email. Try again.');
+    } catch (err: any) {
+      console.error('Forgot password error:', err);
+      
+      // Extract error message from backend response
+      let errorMessage = 'Failed to send reset email. Try again.';
+      
+      if (err.response?.data?.detail) {
+        // Use the detail message from the backend
+        errorMessage = err.response.data.detail;
+      } else if (err.response?.data?.message) {
+        // Fallback to message field
+        errorMessage = err.response.data.message;
+      } else if (err.message) {
+        // Fallback to error message
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

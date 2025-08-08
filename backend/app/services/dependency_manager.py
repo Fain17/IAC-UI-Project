@@ -2,7 +2,6 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 import docker
-from app.db.repositories import ScriptExecutionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +110,7 @@ class DependencyManager:
                 network_mode='none',
                 mem_limit='512m',
                 cpu_period=100000,
-                cpu_quota=25000,
+                cpu_quota=50000,  # 50% CPU
                 security_opt=['no-new-privileges'],
                 read_only=False
             )
@@ -120,7 +119,7 @@ class DependencyManager:
             try:
                 result = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(None, container.wait),
-                    timeout=600  # 10 minutes timeout for Python packages
+                    timeout=600  # 10 minutes timeout for Python dependencies
                 )
                 
                 logs = container.logs().decode('utf-8')
@@ -173,13 +172,13 @@ class DependencyManager:
         try:
             # Create package.json content
             package_json = {
-                "name": "workflow-dependencies",
+                "name": "temp-project",
                 "version": "1.0.0",
-                "dependencies": {pkg: "*" for pkg in packages}
+                "dependencies": {package: "latest" for package in packages}
             }
             
             import json
-            package_json_content = json.dumps(package_json)
+            package_json_content = json.dumps(package_json, indent=2)
             
             # Create a temporary container to install Node.js dependencies
             container = self.docker_client.containers.run(
@@ -190,7 +189,7 @@ class DependencyManager:
                 network_mode='none',
                 mem_limit='512m',
                 cpu_period=100000,
-                cpu_quota=25000,
+                cpu_quota=50000,  # 50% CPU
                 security_opt=['no-new-privileges'],
                 read_only=False
             )
@@ -199,7 +198,7 @@ class DependencyManager:
             try:
                 result = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(None, container.wait),
-                    timeout=600  # 10 minutes timeout for Node.js packages
+                    timeout=600  # 10 minutes timeout for Node.js dependencies
                 )
                 
                 logs = container.logs().decode('utf-8')
@@ -240,58 +239,31 @@ class DependencyManager:
             }
     
     def get_suggested_dependencies(self, script_type: str) -> List[str]:
-        """Get suggested dependencies based on script type."""
+        """Get suggested dependencies for a script type."""
         suggestions = {
-            "sh": [
-                "curl", "wget", "jq", "git", "docker", "kubectl",
-                "aws-cli", "gcloud", "az", "terraform"
-            ],
-            "playbook": [
-                "ansible", "ansible-core", "ansible-runner"
-            ],
-            "terraform": [
-                "terraform", "terraform-docs", "tflint"
-            ],
-            "aws": [
-                "aws-cli", "aws-vault", "aws-iam-authenticator"
-            ],
-            "python": [
-                "requests", "boto3", "kubernetes", "docker",
-                "fastapi", "pandas", "numpy"
-            ],
-            "node": [
-                "axios", "aws-sdk", "kubernetes-client",
-                "express", "jest", "typescript"
-            ]
+            "sh": ["curl", "jq", "wget", "git", "unzip"],
+            "playbook": ["ansible", "ansible-playbook"],
+            "terraform": ["terraform", "aws-cli"],
+            "aws": ["aws-cli", "jq"],
+            "python": ["python3", "pip"],
+            "node": ["node", "npm"]
         }
-        
         return suggestions.get(script_type, [])
     
     def get_default_run_commands(self, script_type: str, filename: str = None) -> str:
-        """Get default run commands based on script type."""
+        """Get default run command for a script type."""
+        if not filename:
+            filename = "script"
+        
         commands = {
-            "sh": "bash script.sh",
-            "playbook": "ansible-playbook playbook.yml",
-            "terraform": "terraform apply",
-            "aws": "bash script.sh",
-            "python": "python script.py",
-            "node": "node script.js"
+            "sh": f"bash {filename}",
+            "playbook": f"ansible-playbook {filename}",
+            "terraform": f"terraform apply",
+            "aws": f"bash {filename}",
+            "python": f"python3 {filename}",
+            "node": f"node {filename}"
         }
-        
-        if filename:
-            # Replace generic names with actual filename
-            if script_type == "sh":
-                return f"bash {filename}"
-            elif script_type == "playbook":
-                return f"ansible-playbook {filename}"
-            elif script_type == "terraform":
-                return f"terraform apply {filename}"
-            elif script_type == "python":
-                return f"python {filename}"
-            elif script_type == "node":
-                return f"node {filename}"
-        
-        return commands.get(script_type, "bash script.sh")
+        return commands.get(script_type, f"bash {filename}")
 
 # Global dependency manager instance
 dependency_manager = DependencyManager() 

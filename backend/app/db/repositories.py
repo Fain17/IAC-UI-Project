@@ -117,7 +117,7 @@ class UserRepository:
             return None
         try:
             result = await db_service.client.execute(
-                "SELECT id, username, email, is_active, is_admin FROM users WHERE id = ? AND is_active = TRUE",
+                "SELECT id, username, email, is_active, is_admin FROM users WHERE id = ?",
                 [user_id]
             )
             
@@ -164,6 +164,33 @@ class UserRepository:
             return None
 
     @staticmethod
+    async def get_by_username_including_inactive(username: str) -> Optional[Dict]:
+        """Get user by username, including inactive users."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, username, email, hashed_password, is_active, is_admin FROM users WHERE username = ?",
+                [username]
+            )
+            
+            if not result.rows:
+                return None
+            
+            user = result.rows[0]
+            return {
+                "id": user[0],
+                "username": user[1],
+                "email": user[2],
+                "hashed_password": user[3],
+                "is_active": user[4],
+                "is_admin": user[5]
+            }
+        except Exception as e:
+            logger.error(f"Error getting user by username (including inactive): {e}")
+            return None
+
+    @staticmethod
     async def get_by_email(email: str) -> Optional[Dict]:
         """Get user by email."""
         if not db_service.client:
@@ -188,6 +215,33 @@ class UserRepository:
             }
         except Exception as e:
             logger.error(f"Error getting user by email: {e}")
+            return None
+
+    @staticmethod
+    async def get_by_email_including_inactive(email: str) -> Optional[Dict]:
+        """Get user by email, including inactive users."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, username, email, hashed_password, is_active, is_admin FROM users WHERE email = ?",
+                [email]
+            )
+            
+            if not result.rows:
+                return None
+            
+            user = result.rows[0]
+            return {
+                "id": user[0],
+                "username": user[1],
+                "email": user[2],
+                "hashed_password": user[3],
+                "is_active": user[4],
+                "is_admin": user[5]
+            }
+        except Exception as e:
+            logger.error(f"Error getting user by email (including inactive): {e}")
             return None
     
     @staticmethod
@@ -418,261 +472,6 @@ class RefreshTokenRepository:
             logger.error(f"Error cleaning up expired refresh tokens: {e}")
             return 0
 
-class WorkflowRepository:
-    """Repository for workflow operations."""
-    
-    @staticmethod
-    async def create(user_id: int, name: str, description: str, steps: list, script_type: str = None, script_content: str = None, script_filename: str = None, run_command: str = None, dependencies: list = None, is_active: bool = True) -> Optional[int]:
-        """Create a new workflow and return its ID."""
-        if not db_service.client:
-            return None
-        try:
-            steps_json = json.dumps(steps)
-            dependencies_json = json.dumps(dependencies) if dependencies else None
-            
-            result = await db_service.client.execute(
-                "INSERT INTO workflows (user_id, name, description, steps, script_type, script_content, script_filename, run_command, dependencies, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
-                [user_id, name, description, steps_json, script_type, script_content, script_filename, run_command, dependencies_json, is_active]
-            )
-            
-            # Check if the insert actually worked
-            if not result.rows:
-                return None
-            
-            workflow_id = result.rows[0][0]
-            return workflow_id
-        except Exception as e:
-            logger.error(f"Error creating workflow: {e}")
-            return None
-    
-    @staticmethod
-    async def get_by_id(workflow_id: int, user_id: int) -> Optional[Dict]:
-        """Get workflow by ID for a specific user."""
-        if not db_service.client:
-            return None
-        try:
-            result = await db_service.client.execute(
-                "SELECT id, name, description, steps, script_type, script_content, script_filename, run_command, dependencies, is_active, created_at, updated_at FROM workflows WHERE id = ? AND user_id = ?",
-                [workflow_id, user_id]
-            )
-            
-            if not result.rows:
-                return None
-            
-            workflow = result.rows[0]
-            return {
-                "id": workflow[0],
-                "name": workflow[1],
-                "description": workflow[2],
-                "steps": json.loads(workflow[3]),
-                "script_type": workflow[4],
-                "script_content": workflow[5],
-                "script_filename": workflow[6],
-                "run_command": workflow[7],
-                "dependencies": json.loads(workflow[8]) if workflow[8] else None,
-                "is_active": bool(workflow[9]),
-                "created_at": workflow[10],
-                "updated_at": workflow[11]
-            }
-        except Exception as e:
-            logger.error(f"Error getting workflow by ID: {e}")
-            return None
-    
-    @staticmethod
-    async def get_all_by_user(user_id: int) -> List[Dict]:
-        """Get all workflows for a specific user."""
-        if not db_service.client:
-            return []
-        try:
-            result = await db_service.client.execute(
-                "SELECT id, name, description, steps, script_type, script_content, script_filename, run_command, dependencies, is_active, created_at, updated_at FROM workflows WHERE user_id = ? ORDER BY created_at DESC",
-                [user_id]
-            )
-            
-            workflows = []
-            for row in result.rows:
-                workflows.append({
-                    "id": row[0],
-                    "name": row[1],
-                    "description": row[2],
-                    "steps": json.loads(row[3]),
-                    "script_type": row[4],
-                    "script_content": row[5],
-                    "script_filename": row[6],
-                    "run_command": row[7],
-                    "dependencies": json.loads(row[8]) if row[8] else None,
-                    "is_active": bool(row[9]),
-                    "created_at": row[10],
-                    "updated_at": row[11]
-                })
-            return workflows
-        except Exception as e:
-            logger.error(f"Error getting workflows for user: {e}")
-            return []
-    
-    @staticmethod
-    async def delete(workflow_id: int, user_id: int) -> bool:
-        """Delete a workflow by ID for a specific user."""
-        if not db_service.client:
-            return False
-        try:
-            result = await db_service.client.execute(
-                "DELETE FROM workflows WHERE id = ? AND user_id = ?",
-                [workflow_id, user_id]
-            )
-            return result.rows_affected > 0
-        except Exception as e:
-            logger.error(f"Error deleting workflow: {e}")
-            return False
-    
-    @staticmethod
-    async def update(workflow_id: int, user_id: int, name: str = None, description: str = None, steps: list = None, script_type: str = None, script_content: str = None, script_filename: str = None, run_command: str = None, dependencies: list = None, is_active: bool = None) -> bool:
-        """Update a workflow by ID for a specific user."""
-        if not db_service.client:
-            return False
-        try:
-            # Build dynamic update query
-            updates = []
-            params = []
-            
-            if name is not None:
-                updates.append("name = ?")
-                params.append(name)
-            if description is not None:
-                updates.append("description = ?")
-                params.append(description)
-            if steps is not None:
-                updates.append("steps = ?")
-                params.append(json.dumps(steps))
-            if script_type is not None:
-                updates.append("script_type = ?")
-                params.append(script_type)
-            if script_content is not None:
-                updates.append("script_content = ?")
-                params.append(script_content)
-            if script_filename is not None:
-                updates.append("script_filename = ?")
-                params.append(script_filename)
-            if run_command is not None:
-                updates.append("run_command = ?")
-                params.append(run_command)
-            if dependencies is not None:
-                updates.append("dependencies = ?")
-                params.append(json.dumps(dependencies))
-            if is_active is not None:
-                updates.append("is_active = ?")
-                params.append(is_active)
-            
-            if not updates:
-                return False
-            
-            updates.append("updated_at = CURRENT_TIMESTAMP")
-            params.extend([workflow_id, user_id])
-            
-            query = f"UPDATE workflows SET {', '.join(updates)} WHERE id = ? AND user_id = ?"
-            result = await db_service.client.execute(query, params)
-            return result.rows_affected > 0
-        except Exception as e:
-            logger.error(f"Error updating workflow: {e}")
-            return False
-
-class ScriptExecutionRepository:
-    """Repository for script execution tracking."""
-    
-    @staticmethod
-    async def create_execution(execution_id: str, workflow_id: int, user_id: int, parameters: dict = None, environment: dict = None) -> bool:
-        """Create a new script execution record."""
-        if not db_service.client:
-            return False
-        try:
-            parameters_json = json.dumps(parameters) if parameters else None
-            environment_json = json.dumps(environment) if environment else None
-            
-            await db_service.client.execute(
-                "INSERT INTO script_executions (execution_id, workflow_id, user_id, status, parameters, environment) VALUES (?, ?, ?, ?, ?, ?)",
-                [execution_id, workflow_id, user_id, "running", parameters_json, environment_json]
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Error creating script execution: {e}")
-            return False
-    
-    @staticmethod
-    async def update_execution_result(execution_id: str, status: str, output: str = None, error: str = None, exit_code: int = None, execution_time: float = None) -> bool:
-        """Update script execution with results."""
-        if not db_service.client:
-            return False
-        try:
-            await db_service.client.execute(
-                "UPDATE script_executions SET status = ?, output = ?, error = ?, exit_code = ?, execution_time = ?, completed_at = CURRENT_TIMESTAMP WHERE execution_id = ?",
-                [status, output, error, exit_code, execution_time, execution_id]
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Error updating script execution: {e}")
-            return False
-    
-    @staticmethod
-    async def get_execution(execution_id: str) -> Optional[Dict]:
-        """Get script execution by ID."""
-        if not db_service.client:
-            return None
-        try:
-            result = await db_service.client.execute(
-                "SELECT execution_id, workflow_id, user_id, status, output, error, exit_code, execution_time, parameters, environment, started_at, completed_at FROM script_executions WHERE execution_id = ?",
-                [execution_id]
-            )
-            
-            if not result.rows:
-                return None
-            
-            execution = result.rows[0]
-            return {
-                "execution_id": execution[0],
-                "workflow_id": execution[1],
-                "user_id": execution[2],
-                "status": execution[3],
-                "output": execution[4],
-                "error": execution[5],
-                "exit_code": execution[6],
-                "execution_time": execution[7],
-                "parameters": json.loads(execution[8]) if execution[8] else None,
-                "environment": json.loads(execution[9]) if execution[9] else None,
-                "started_at": execution[10],
-                "completed_at": execution[11]
-            }
-        except Exception as e:
-            logger.error(f"Error getting script execution: {e}")
-            return None
-    
-    @staticmethod
-    async def get_executions_by_workflow(workflow_id: int, user_id: int, limit: int = 10) -> List[Dict]:
-        """Get recent executions for a workflow."""
-        if not db_service.client:
-            return []
-        try:
-            result = await db_service.client.execute(
-                "SELECT execution_id, status, output, error, exit_code, execution_time, started_at, completed_at FROM script_executions WHERE workflow_id = ? AND user_id = ? ORDER BY started_at DESC LIMIT ?",
-                [workflow_id, user_id, limit]
-            )
-            
-            executions = []
-            for row in result.rows:
-                executions.append({
-                    "execution_id": row[0],
-                    "status": row[1],
-                    "output": row[2],
-                    "error": row[3],
-                    "exit_code": row[4],
-                    "execution_time": row[5],
-                    "started_at": row[6],
-                    "completed_at": row[7]
-                })
-            return executions
-        except Exception as e:
-            logger.error(f"Error getting workflow executions: {e}")
-            return []
-
 class UserGroupRepository:
     """Repository for user group operations."""
     
@@ -793,13 +592,17 @@ class UserPermissionRepository:
     async def create(user_id: int, permission_level: str) -> Optional[int]:
         """Create a new user permission and return its ID."""
         if not db_service.client:
+            logger.error("Database client not initialized")
             return None
         try:
+            logger.info(f"Creating permission for user {user_id} with level {permission_level}")
             result = await db_service.client.execute(
                 "INSERT INTO user_permissions (user_id, permission_level) VALUES (?, ?) RETURNING id",
                 [user_id, permission_level]
             )
-            return result.rows[0][0] if result.rows else None
+            permission_id = result.rows[0][0] if result.rows else None
+            logger.info(f"Created permission with ID: {permission_id}")
+            return permission_id
         except Exception as e:
             logger.error(f"Error creating user permission: {e}")
             return None
@@ -834,12 +637,15 @@ class UserPermissionRepository:
     async def update(user_id: int, permission_level: str) -> bool:
         """Update user permission."""
         if not db_service.client:
+            logger.error("Database client not initialized")
             return False
         try:
+            logger.info(f"Updating permission for user {user_id} to {permission_level}")
             result = await db_service.client.execute(
                 "UPDATE user_permissions SET permission_level = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
                 [permission_level, user_id]
             )
+            logger.info(f"Update result: rows_affected={result.rows_affected}")
             return result.rows_affected > 0
         except Exception as e:
             logger.error(f"Error updating user permission: {e}")
@@ -859,6 +665,37 @@ class UserPermissionRepository:
         except Exception as e:
             logger.error(f"Error deleting user permission: {e}")
             return False
+
+    @staticmethod
+    async def get_all() -> List[Dict]:
+        """Get all user permissions."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT up.user_id, up.permission_level, up.created_at, up.updated_at,
+                       u.username, u.email, u.is_active, u.is_admin
+                FROM user_permissions up
+                JOIN users u ON up.user_id = u.id
+                ORDER BY u.username
+            """)
+            
+            permissions = []
+            for row in result.rows:
+                permissions.append({
+                    "user_id": row[0],
+                    "permission_level": row[1],
+                    "created_at": row[2],
+                    "updated_at": row[3],
+                    "username": row[4],
+                    "email": row[5],
+                    "is_active": bool(row[6]),
+                    "is_admin": bool(row[7])
+                })
+            return permissions
+        except Exception as e:
+            logger.error(f"Error getting all user permissions: {e}")
+            return []
 
 class UserGroupAssignmentRepository:
     """Repository for user group assignment operations."""
@@ -944,4 +781,134 @@ class UserGroupAssignmentRepository:
             return result.rows_affected > 0
         except Exception as e:
             logger.error(f"Error removing user from group: {e}")
+            return False
+
+class WorkflowRepository:
+    """Repository for workflow operations."""
+    
+    @staticmethod
+    async def create(workflow_id: str, user_id: int, name: str, description: str = None, steps: List[Dict] = None) -> bool:
+        """Create a new workflow and return success status."""
+        if not db_service.client:
+            return False
+        try:
+            # Convert steps to JSON string
+            steps_json = json.dumps(steps or [])
+            
+            result = await db_service.client.execute(
+                "INSERT INTO workflows (id, user_id, name, description, steps) VALUES (?, ?, ?, ?, ?)",
+                [workflow_id, user_id, name, description, steps_json]
+            )
+            
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error creating workflow: {e}")
+            return False
+    
+    @staticmethod
+    async def get_by_id(workflow_id: str, user_id: int) -> Optional[Dict]:
+        """Get workflow by ID for a specific user."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, user_id, name, description, steps, is_active, created_at, updated_at FROM workflows WHERE id = ? AND user_id = ?",
+                [workflow_id, user_id]
+            )
+            
+            if not result.rows:
+                return None
+            
+            workflow = result.rows[0]
+            return {
+                "id": workflow[0],
+                "user_id": workflow[1],
+                "name": workflow[2],
+                "description": workflow[3],
+                "steps": json.loads(workflow[4]),
+                "is_active": bool(workflow[5]),
+                "created_at": workflow[6],
+                "updated_at": workflow[7]
+            }
+        except Exception as e:
+            logger.error(f"Error getting workflow by ID: {e}")
+            return None
+    
+    @staticmethod
+    async def get_all_by_user(user_id: int) -> List[Dict]:
+        """Get all workflows for a specific user."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, user_id, name, description, steps, is_active, created_at, updated_at FROM workflows WHERE user_id = ? ORDER BY created_at DESC",
+                [user_id]
+            )
+            
+            workflows = []
+            for row in result.rows:
+                workflows.append({
+                    "id": row[0],
+                    "user_id": row[1],
+                    "name": row[2],
+                    "description": row[3],
+                    "steps": json.loads(row[4]),
+                    "is_active": bool(row[5]),
+                    "created_at": row[6],
+                    "updated_at": row[7]
+                })
+            return workflows
+        except Exception as e:
+            logger.error(f"Error getting workflows for user: {e}")
+            return []
+    
+    @staticmethod
+    async def delete(workflow_id: str, user_id: int) -> bool:
+        """Delete a workflow by ID for a specific user."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM workflows WHERE id = ? AND user_id = ?",
+                [workflow_id, user_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting workflow: {e}")
+            return False
+    
+    @staticmethod
+    async def update(workflow_id: str, user_id: int, name: str = None, description: str = None, steps: List[Dict] = None, is_active: bool = None) -> bool:
+        """Update a workflow by ID for a specific user."""
+        if not db_service.client:
+            return False
+        try:
+            # Build dynamic update query
+            updates = []
+            params = []
+            
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            if steps is not None:
+                updates.append("steps = ?")
+                params.append(json.dumps(steps))
+            if is_active is not None:
+                updates.append("is_active = ?")
+                params.append(is_active)
+            
+            if not updates:
+                return False
+            
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.extend([workflow_id, user_id])
+            
+            query = f"UPDATE workflows SET {', '.join(updates)} WHERE id = ? AND user_id = ?"
+            result = await db_service.client.execute(query, params)
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating workflow: {e}")
             return False 

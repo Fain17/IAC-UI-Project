@@ -2,19 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import tokenManager from '../../utils/tokenManager';
+import { getCurrentUserPermissions } from '../../api';
 import './AdminProfilePage.css';
 
 interface AdminInfo {
   username: string;
   email: string;
   isAdmin: boolean;
+  permission_level?: string;
 }
 
 const AdminProfilePage: React.FC = () => {
   const [adminInfo, setAdminInfo] = useState<AdminInfo>({
     username: '',
     email: '',
-    isAdmin: false
+    isAdmin: false,
+    permission_level: 'viewer'
   });
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -33,17 +36,47 @@ const AdminProfilePage: React.FC = () => {
   const [usernameError, setUsernameError] = useState('');
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // Load admin info from TokenManager
-    const user = tokenManager.getUser();
-    if (user) {
-      setAdminInfo({
-        username: user.username || '',
-        email: user.email || '',
-        isAdmin: user.isAdmin || false
-      });
-      setNewUsername(user.username || '');
+  // Function to fetch current user permissions
+  const fetchCurrentUserPermissions = async () => {
+    try {
+      const response = await getCurrentUserPermissions();
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch current user permissions:', error);
+      return null;
     }
+  };
+
+  useEffect(() => {
+    const loadUserInfo = async () => {
+      // Load admin info from TokenManager
+      const user = tokenManager.getUser();
+      if (user) {
+        setAdminInfo({
+          username: user.username || '',
+          email: user.email || '',
+          isAdmin: user.isAdmin || false,
+          permission_level: 'viewer'
+        });
+        setNewUsername(user.username || '');
+
+        // Fetch current user permissions using the new endpoint
+        try {
+          const permissions = await fetchCurrentUserPermissions();
+          if (permissions) {
+            setAdminInfo(prev => ({
+              ...prev,
+              permission_level: permissions.permission_level || 'viewer',
+              isAdmin: permissions.is_admin || prev.isAdmin
+            }));
+          }
+        } catch (error) {
+          console.error('Failed to fetch user permissions:', error);
+        }
+      }
+    };
+
+    loadUserInfo();
   }, []);
 
   const handlePasswordReset = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -183,8 +216,18 @@ const AdminProfilePage: React.FC = () => {
               <strong>Email:</strong> {adminInfo.email}
             </div>
             <div className="info-row">
-              <strong>Role:</strong> <span style={{ background: adminInfo.isAdmin ? '#007bff' : '#6c757d', color: 'white', padding: '0.2rem 0.5rem', borderRadius: '3px', fontSize: '0.9em' }}>
-                {adminInfo.isAdmin ? 'Admin' : 'User'}
+              <strong>Role:</strong> <span style={{ 
+                background: adminInfo.isAdmin ? '#007bff' : 
+                           adminInfo.permission_level === 'manager' ? '#28a745' : '#6c757d', 
+                color: 'white', 
+                padding: '0.2rem 0.5rem', 
+                borderRadius: '3px', 
+                fontSize: '0.9em' 
+              }}>
+                {adminInfo.isAdmin ? 'Admin' : 
+                 adminInfo.permission_level === 'manager' ? 'Manager' : 
+                 adminInfo.permission_level === 'viewer' ? 'Viewer' : 
+                 adminInfo.permission_level || 'User'}
               </span>
             </div>
           </div>

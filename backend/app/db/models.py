@@ -1,6 +1,12 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
+from enum import Enum
+
+# Script Type Enum
+class ScriptType(str, Enum):
+    PYTHON = "python"
+    NODEJS = "nodejs"
 
 # Config Mapping Models
 class ConfigMappingBase(BaseModel):
@@ -93,67 +99,6 @@ class RefreshTokenResponse(BaseModel):
     token_type: str
     user: dict
 
-# Workflow Models
-class WorkflowBase(BaseModel):
-    name: str
-    description: Optional[str] = None
-    steps: list  # List of workflow steps/actions
-    is_active: bool = True
-    script_type: Optional[str] = None  # sh, playbook, terraform, aws, etc.
-    script_content: Optional[str] = None  # The actual code/script content
-    script_filename: Optional[str] = None  # Original filename if uploaded
-    run_command: Optional[str] = None  # Command to run the script (e.g., "bash script.sh", "terraform apply")
-    dependencies: Optional[list] = None  # List of dependencies to install
-
-class WorkflowCreate(WorkflowBase):
-    pass
-
-class WorkflowUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    steps: Optional[list] = None
-    is_active: Optional[bool] = None
-    script_type: Optional[str] = None
-    script_content: Optional[str] = None
-    script_filename: Optional[str] = None
-    run_command: Optional[str] = None
-    dependencies: Optional[list] = None
-
-class Workflow(WorkflowBase):
-    id: int
-    user_id: int
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-# Script Execution Models
-class ScriptExecutionRequest(BaseModel):
-    workflow_id: int
-    parameters: Optional[dict] = None  # Parameters to pass to the script
-    environment: Optional[dict] = None  # Environment variables
-    run_command: Optional[str] = None  # Override the default run command
-
-class ScriptExecutionResponse(BaseModel):
-    execution_id: str
-    status: str  # running, completed, failed
-    output: Optional[str] = None
-    error: Optional[str] = None
-    exit_code: Optional[int] = None
-    execution_time: Optional[float] = None
-
-# Dependency Management Models
-class DependencyInstallRequest(BaseModel):
-    workflow_id: int
-    dependencies: list  # List of dependencies to install
-
-class DependencyInstallResponse(BaseModel):
-    success: bool
-    message: str
-    installed_dependencies: list
-    failed_dependencies: list
-
 # User Management Models
 class UserGroupBase(BaseModel):
     name: str
@@ -215,4 +160,47 @@ class AdminUserCreate(BaseModel):
 
 class AdminUserPermissionUpdate(BaseModel):
     permission_level: Optional[str] = None
-    is_active: Optional[bool] = None 
+    is_active: Optional[bool] = None
+
+# Workflow Models
+
+class WorkflowStep(BaseModel):
+    """Model for updating workflow steps (excludes id field)."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    order: Optional[int] = None  # Position in the workflow (1-based)
+    script_type: Optional[ScriptType] = None  # python, nodejs
+    script_filename: Optional[str] = None
+    run_command: Optional[str] = None
+    dependencies: Optional[List[str]] = None
+    parameters: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+class WorkflowBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    steps: List[WorkflowStep] = []
+
+class WorkflowCreateRequest(BaseModel):
+    """Model for creating a new workflow (JSON input)."""
+    name: str
+    description: Optional[str] = None
+
+class WorkflowCreate(WorkflowBase):
+    pass
+
+class WorkflowUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    steps: Optional[List[WorkflowStep]] = None
+    is_active: Optional[bool] = None
+
+class Workflow(WorkflowBase):
+    id: str  # UUID for workflow
+    user_id: int
+    is_active: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True 
