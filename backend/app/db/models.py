@@ -181,6 +181,11 @@ class WorkflowBase(BaseModel):
     description: Optional[str] = None
     steps: List[WorkflowStep] = []
 
+class WorkflowCreateRequest(BaseModel):
+    """Model for creating a new workflow (JSON input)."""
+    name: str
+    description: Optional[str] = None
+
 class WorkflowCreate(WorkflowBase):
     pass
 

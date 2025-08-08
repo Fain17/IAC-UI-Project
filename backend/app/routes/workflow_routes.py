@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Form, Request, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Request, Depends, HTTPException, Query, Body
 from fastapi.responses import JSONResponse
 from app.services.workflow_service import (
     create_workflow, get_user_workflows, get_workflow_by_id, 
@@ -7,10 +7,9 @@ from app.services.workflow_service import (
 )
 from app.db.repositories import WorkflowRepository
 from app.auth.dependencies import get_current_user
-from app.db.models import WorkflowCreate, WorkflowUpdate, WorkflowStep
+from app.db.models import WorkflowCreateRequest, WorkflowUpdate, WorkflowStep
 from typing import List, Dict, Any
 import logging
-import json
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -19,89 +18,27 @@ router = APIRouter(prefix="/workflow")
 
 @router.post("/create", tags=["Workflow"])
 async def create_workflow_route(
-    name: str = Form(...),
-    description: str = Form(""),
-    steps: str = Form("[]"),  # JSON string of steps
+    workflow_data: WorkflowCreateRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Create a new workflow with name, description, and optional steps.
+    Create a new workflow with name and description.
     
-    Steps should be provided as a JSON array of step objects with the following structure:
-    [
-        {
-            "name": "step_name",
-            "description": "step_description",
-            "order": 1,
-            "script_type": "python",
-            "script_filename": "script.py",
-            "run_command": "python script.py",
-            "dependencies": ["boto3", "requests"],
-            "parameters": {"ENV": "production"},
-            "is_active": true
-        }
-    ]
+    This creates a workflow template with no steps initially.
+    Steps can be added later using the append step route.
     
-    Note: The 'id' field is auto-generated as a UUID (e.g., step_a533e6a0) and should not be provided.
-    Script types supported: "python", "nodejs"
-    If steps is empty or not provided, an empty workflow will be created.
-    Step orders must be unique and sequential (1, 2, 3, ...).
+    Note: Steps are not included in the initial creation and will be an empty list.
     """
     try:
-        if not name or not name.strip():
+        if not workflow_data.name or not workflow_data.name.strip():
             raise HTTPException(status_code=400, detail="Workflow name is required")
         
-        # Parse steps if provided
-        steps_list = []
-        if steps and steps.strip() != "[]":
-            try:
-                steps_data = json.loads(steps)
-                if not isinstance(steps_data, list):
-                    raise ValueError("Steps must be a list")
-                
-                # Validate and convert steps
-                for i, step_data in enumerate(steps_data):
-                    if not isinstance(step_data, dict):
-                        raise ValueError(f"Step {i} must be a dictionary")
-                    
-                    # Ensure required fields
-                    if "name" not in step_data:
-                        raise ValueError(f"Step {i} missing required field 'name'")
-                    if "order" not in step_data:
-                        step_data["order"] = i + 1
-                    
-                    # Remove any provided id field - it will be auto-generated
-                    if "id" in step_data:
-                        del step_data["id"]
-                    
-                    # Validate step structure
-                    step = WorkflowStep(
-                        name=step_data["name"],
-                        description=step_data.get("description"),
-                        order=step_data["order"],
-                        script_type=step_data.get("script_type"),
-                        script_filename=step_data.get("script_filename"),
-                        run_command=step_data.get("run_command"),
-                        dependencies=step_data.get("dependencies", []),
-                        parameters=step_data.get("parameters", {}),
-                        is_active=step_data.get("is_active", True)
-                    )
-                    steps_list.append(step.model_dump())
-                    
-            except (json.JSONDecodeError, ValueError) as e:
-                raise HTTPException(status_code=400, detail=f"Invalid steps format: {str(e)}")
-        
-        # Validate step orders
-        validation = validate_step_orders(steps_list)
-        if not validation["success"]:
-            raise HTTPException(status_code=400, detail=validation["error"])
-        
-        # Create workflow
+        # Create workflow with empty steps list
         result = await create_workflow(
             user_id=current_user["id"],
-            name=name.strip(),
-            description=description.strip() if description else None,
-            steps=steps_list
+            name=workflow_data.name.strip(),
+            description=workflow_data.description.strip() if workflow_data.description else None,
+            steps=[]  # Default to empty list
         )
         
         if result["success"]:
@@ -109,7 +46,7 @@ async def create_workflow_route(
                 "success": True,
                 "workflow_id": result["workflow_id"],
                 "message": result["message"],
-                "steps_count": len(steps_list)
+                "steps_count": 0
             }, status_code=201)
         else:
             raise HTTPException(status_code=400, detail=result["error"])
@@ -202,6 +139,7 @@ async def update_workflow_route(
         if workflow_data.description is not None:
             update_data["description"] = workflow_data.description
         if workflow_data.steps is not None:
+            # Convert WorkflowStep objects to dictionaries
             update_data["steps"] = [step.model_dump() for step in workflow_data.steps]
         if workflow_data.is_active is not None:
             update_data["is_active"] = workflow_data.is_active
@@ -610,4 +548,87 @@ async def list_steps_route(
         raise
     except Exception as e:
         logger.error(f"Error listing steps: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.put("/{workflow_id}/steps/id/{step_id}", tags=["Workflow Steps"])
+async def update_step_by_id_route(
+    workflow_id: str,
+    step_id: str,
+    step_data: WorkflowStep,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update a specific step in the workflow by its step ID.
+    Step ID is immutable and unique (e.g., step_a533e6a0).
+    If updating the order, the new order must be unique and not conflict with existing steps.
+    
+    This route is useful for:
+    - Updating step properties (name, description, script_type, etc.)
+    - Moving a single step to a different position
+    - Individual step modifications
+    
+    Note: The 'id' field is auto-generated and cannot be updated.
+    For bulk reordering of multiple steps, use the /reorder endpoint instead.
+    """
+    try:
+        # Get the current workflow
+        workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found or access denied")
+        
+        # Get current steps
+        current_steps = workflow.get("steps", [])
+        
+        # Find the step by ID
+        step_found = False
+        step_to_update = None
+        for step in current_steps:
+            if step["id"] == step_id:
+                step_to_update = step
+                step_found = True
+                break
+        
+        if not step_found:
+            raise HTTPException(status_code=404, detail=f"Step with ID {step_id} not found")
+        
+        # Check if the new order conflicts with existing steps (if order is being updated)
+        if step_data.order is not None and step_data.order != step_to_update["order"]:
+            existing_orders = [s.get("order") for s in current_steps if s.get("order") is not None and s["id"] != step_id]
+            if step_data.order in existing_orders:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Order {step_data.order} already exists. Please use a unique order number."
+                )
+        
+        # Update step data (exclude id field as it cannot be updated)
+        update_data = step_data.model_dump(exclude_unset=True)
+        step_to_update.update(update_data)
+        step_to_update["updated_at"] = datetime.now().isoformat()
+        
+        # Validate all step orders after update
+        validation = validate_step_orders(current_steps)
+        if not validation["success"]:
+            raise HTTPException(status_code=400, detail=validation["error"])
+        
+        # Update the workflow with updated steps
+        result = await update_workflow(
+            workflow_id=workflow_id,
+            user_id=current_user["id"],
+            steps=current_steps
+        )
+        
+        if result["success"]:
+            return JSONResponse({
+                "success": True,
+                "message": f"Step '{step_to_update['name']}' updated successfully",
+                "updated_step": step_to_update,
+                "total_steps": len(current_steps)
+            })
+        else:
+            raise HTTPException(status_code=400, detail=result["error"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating step by ID: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 
