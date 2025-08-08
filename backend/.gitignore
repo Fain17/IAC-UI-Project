@@ -101,6 +101,23 @@ poetry.lock
 .idea/
 *.iml
 
+# Script files and storage
+data/scripts/
+*.sh
+*.py
+*.js
+*.tf
+*.yml
+*.yaml
+*.json
+*.md
+*.txt
+*.log
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -121,3 +138,4 @@ docker-compose.yml
 
 # FastAPI auto-generated OpenAPI docs
 openapi.json
+
