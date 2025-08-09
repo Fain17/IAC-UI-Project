@@ -1,0 +1,5 @@
+/* Reuse existing sidebar and content styles; add minor tweaks if needed */
+.workflows-content { max-width: 1200px; margin: 0 auto; padding-top: 2rem; }
+.workflows-header { margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #e9ecef; }
+.workflows-header h1 { color: #333; margin: 0; font-size: 2rem; font-weight: 600; }
+.workflows-body { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 1px solid #e9ecef; } 
