@@ -125,6 +125,17 @@ class DatabaseService:
             # Check if workflows table exists and migrate if needed
             await self._migrate_workflows_table()
             
+            # Create docker image mappings table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS docker_image_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    types TEXT NOT NULL, -- JSON array of script types (e.g., ["python"], ["python","nodejs"]) 
+                    image TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             logger.info("Database tables created successfully")
             
         except Exception as e:
