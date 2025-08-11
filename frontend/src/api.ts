@@ -22,7 +22,20 @@ API.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const status = error.response?.status;
+    const detail: string | undefined = error.response?.data?.detail;
+
+    // If backend indicates the token is invalid, logout immediately
+    if (
+      status === 401 &&
+      typeof detail === 'string' &&
+      (/invalid token/i.test(detail) || /could not validate credentials/i.test(detail) || /token is invalid/i.test(detail))
+    ) {
+      tokenManager.clearAuth();
+      return Promise.reject(error);
+    }
+
+    if (status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
       try {
@@ -304,3 +317,96 @@ export const createScriptForStep = (workflowId: string, stepId: string, filename
     }
   });
 }; 
+
+export interface WorkflowExecutionResultStep {
+  id: string;
+  name: string;
+  order: number;
+  status: string;
+  execution_time?: number;
+  return_code?: number;
+  error?: string | null;
+  output?: string;
+  reason?: string;
+}
+
+export interface WorkflowExecutionResponse {
+  success: boolean;
+  workflow_id: string;
+  execution_type: 'local' | 'docker';
+  status: string;
+  started_at: string;
+  ended_at: string;
+  total_time: number;
+  steps_executed: number;
+  steps_skipped: number;
+  steps_failed: number;
+  results: WorkflowExecutionResultStep[];
+}
+
+export interface StepExecutionResponse {
+  success: boolean;
+  error: string | null;
+  execution_time: number;
+  output: string;
+  status: string;
+  return_code: number;
+  start_time: string;
+  end_time: string;
+  workflow_id: string;
+  step_id: string;
+  step_name: string;
+  script_filename?: string;
+  run_command?: string;
+  execution_type: 'local' | 'docker';
+  container_id?: string;
+  script_type?: 'python' | 'nodejs';
+}
+
+export interface StepExecutionStatusResponse {
+  workflow_id: string;
+  step_id: string;
+  step_name: string;
+  workflow_active: boolean;
+  step_active: boolean;
+  script_filename: string | null;
+  run_command: string | null;
+  script_type: 'python' | 'nodejs' | null;
+  script_exists: boolean;
+  script_path?: string;
+  docker_available: boolean;
+  can_execute: boolean;
+  validation_error: string | null;
+  execution_prerequisites: Record<string, boolean>;
+}
+
+// Execute entire workflow
+export const executeEntireWorkflow = (
+  workflowId: string,
+  executionType: 'local' | 'docker' = 'local',
+  continueOnFailure: boolean = false
+): Promise<AxiosResponse<WorkflowExecutionResponse>> =>
+  API.post(`/workflow/${workflowId}/execute`, null, {
+    params: { execution_type: executionType, continue_on_failure: continueOnFailure },
+  });
+
+// Execute single step locally
+export const executeStepLocal = (
+  workflowId: string,
+  stepId: string
+): Promise<AxiosResponse<StepExecutionResponse>> =>
+  API.post(`/workflow/${workflowId}/steps/${stepId}/execute/local`);
+
+// Execute single step in docker
+export const executeStepDocker = (
+  workflowId: string,
+  stepId: string
+): Promise<AxiosResponse<StepExecutionResponse>> =>
+  API.post(`/workflow/${workflowId}/steps/${stepId}/execute/docker`);
+
+// Get step execution status
+export const getStepExecutionStatus = (
+  workflowId: string,
+  stepId: string
+): Promise<AxiosResponse<StepExecutionStatusResponse>> =>
+  API.get(`/workflow/${workflowId}/steps/${stepId}/execute/status`); 

@@ -11,6 +11,8 @@ from app.db.models import WorkflowCreateRequest, WorkflowUpdate, WorkflowStep
 from typing import List, Dict, Any
 import logging
 from datetime import datetime
+from app.services.execution_service import execution_service
+from app.services.file_storage_service import file_storage
 
 logger = logging.getLogger(__name__)
 
@@ -631,4 +633,246 @@ async def update_step_by_id_route(
         raise
     except Exception as e:
         logger.error(f"Error updating step by ID: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") 
+
+@router.post("/{workflow_id}/execute", tags=["Workflow Execution"])
+async def execute_workflow_route(
+    workflow_id: str,
+    execution_type: str = Query("local", pattern="^(local|docker)$"),
+    continue_on_failure: bool = Query(False),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Execute the entire workflow sequentially.
+    - Executes steps in ascending order.
+    - Skips steps with is_active = False.
+    - Tracks overall status: init, running, completed, failed, partial_failed, completed_with_skips.
+    - Persists per-step last execution metadata back into the workflow's steps.
+    """
+    try:
+        started_at = datetime.now()
+        overall_status = "init"
+        steps_results: List[Dict[str, Any]] = []
+        steps_executed = 0
+        steps_skipped = 0
+        steps_failed = 0
+
+        # Load workflow and authorize
+        workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found or access denied")
+
+        if not workflow.get("is_active", True):
+            raise HTTPException(status_code=400, detail="Workflow is not active")
+
+        current_steps: List[Dict[str, Any]] = workflow.get("steps", [])
+        # Sort by order (1-based)
+        current_steps.sort(key=lambda s: s.get("order") or 0)
+
+        overall_status = "running"
+
+        # Map for updating steps by id later
+        step_id_to_index: Dict[str, int] = {s.get("id"): i for i, s in enumerate(current_steps) if s.get("id")}
+
+        for step in current_steps:
+            step_id = step.get("id")
+            step_name = step.get("name")
+            step_order = step.get("order")
+
+            # Skip inactive steps
+            if not step.get("is_active", True):
+                steps_skipped += 1
+                step_result = {
+                    "id": step_id,
+                    "name": step_name,
+                    "order": step_order,
+                    "status": "skipped",
+                    "reason": "Step is inactive"
+                }
+                steps_results.append(step_result)
+
+                # Persist minimal metadata
+                step["last_status"] = "skipped"
+                step["last_run_started_at"] = None
+                step["last_run_ended_at"] = None
+                step["last_execution_time"] = 0
+                step["updated_at"] = datetime.now().isoformat()
+                continue
+
+            # Validate prerequisites quickly
+            validation = execution_service.validate_execution_prerequisites(workflow, step)
+            if not validation["valid"]:
+                steps_failed += 1
+                step_result = {
+                    "id": step_id,
+                    "name": step_name,
+                    "order": step_order,
+                    "status": "failed",
+                    "error": validation.get("error")
+                }
+                steps_results.append(step_result)
+
+                # Persist failure metadata
+                now_iso = datetime.now().isoformat()
+                step["last_status"] = "failed"
+                step["last_run_started_at"] = now_iso
+                step["last_run_ended_at"] = now_iso
+                step["last_execution_time"] = 0
+                step["last_error"] = validation.get("error")
+                step["updated_at"] = now_iso
+
+                if not continue_on_failure:
+                    overall_status = "failed"
+                    break
+                else:
+                    continue
+
+            # Resolve paths
+            step_dir_name = step.get("directory_name")
+            if not step_dir_name:
+                steps_failed += 1
+                err = "Step directory not found"
+                step_result = {
+                    "id": step_id,
+                    "name": step_name,
+                    "order": step_order,
+                    "status": "failed",
+                    "error": err
+                }
+                steps_results.append(step_result)
+                now_iso = datetime.now().isoformat()
+                step["last_status"] = "failed"
+                step["last_run_started_at"] = now_iso
+                step["last_run_ended_at"] = now_iso
+                step["last_execution_time"] = 0
+                step["last_error"] = err
+                step["updated_at"] = now_iso
+                if not continue_on_failure:
+                    overall_status = "failed"
+                    break
+                else:
+                    continue
+
+            step_dir = file_storage.get_step_directory(workflow_id, step_dir_name)
+            if not step_dir:
+                steps_failed += 1
+                err = "Step directory path not found"
+                step_result = {
+                    "id": step_id,
+                    "name": step_name,
+                    "order": step_order,
+                    "status": "failed",
+                    "error": err
+                }
+                steps_results.append(step_result)
+                now_iso = datetime.now().isoformat()
+                step["last_status"] = "failed"
+                step["last_run_started_at"] = now_iso
+                step["last_run_ended_at"] = now_iso
+                step["last_execution_time"] = 0
+                step["last_error"] = err
+                step["updated_at"] = now_iso
+                if not continue_on_failure:
+                    overall_status = "failed"
+                    break
+                else:
+                    continue
+
+            script_filename = step.get("script_filename")
+            script_path = step_dir / script_filename if script_filename else None
+            run_command = step.get("run_command")
+            parameters = step.get("parameters", {})
+            script_type = str(step.get("script_type", "python"))
+
+            # Execute step
+            if execution_type == "docker":
+                result = await execution_service.execute_step_in_docker(
+                    workflow_id=workflow_id,
+                    step_id=step_id,
+                    script_path=str(script_path) if script_path else "",
+                    run_command=run_command,
+                    working_dir=str(step_dir),
+                    script_type=script_type,
+                    parameters=parameters
+                )
+            else:
+                result = await execution_service.execute_step_locally(
+                    workflow_id=workflow_id,
+                    step_id=step_id,
+                    script_path=str(script_path) if script_path else "",
+                    run_command=run_command,
+                    working_dir=str(step_dir),
+                    parameters=parameters
+                )
+
+            steps_executed += 1 if result.get("status") != "skipped" else 0
+            if not result.get("success"):
+                steps_failed += 1
+
+            # Trim output for storage
+            output = result.get("output") or ""
+            if isinstance(output, str) and len(output) > 4000:
+                output = output[:4000] + "...<truncated>"
+
+            # Persist per-step metadata
+            step["last_status"] = result.get("status")
+            step["last_return_code"] = result.get("return_code")
+            step["last_output"] = output
+            step["last_error"] = result.get("error")
+            step["last_run_started_at"] = result.get("start_time")
+            step["last_run_ended_at"] = result.get("end_time")
+            step["last_execution_time"] = result.get("execution_time")
+            step["updated_at"] = datetime.now().isoformat()
+
+            steps_results.append({
+                "id": step_id,
+                "name": step_name,
+                "order": step_order,
+                "status": result.get("status"),
+                "execution_time": result.get("execution_time"),
+                "return_code": result.get("return_code"),
+                "error": result.get("error"),
+                "output": output
+            })
+
+            if not result.get("success") and not continue_on_failure:
+                overall_status = "failed"
+                break
+
+        # Determine overall status if not set to failed already
+        ended_at = datetime.now()
+        if overall_status != "failed":
+            if steps_failed > 0 and continue_on_failure:
+                overall_status = "partial_failed"
+            elif steps_skipped > 0 and steps_failed == 0:
+                overall_status = "completed_with_skips"
+            else:
+                overall_status = "completed"
+
+        # Persist updated steps back to workflow
+        await update_workflow(
+            workflow_id=workflow_id,
+            user_id=current_user["id"],
+            steps=current_steps
+        )
+
+        total_time = (ended_at - started_at).total_seconds()
+        return JSONResponse({
+            "success": overall_status in ("completed", "completed_with_skips"),
+            "workflow_id": workflow_id,
+            "execution_type": execution_type,
+            "status": overall_status,
+            "started_at": started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
+            "total_time": total_time,
+            "steps_executed": steps_executed,
+            "steps_skipped": steps_skipped,
+            "steps_failed": steps_failed,
+            "results": steps_results
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing workflow: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 

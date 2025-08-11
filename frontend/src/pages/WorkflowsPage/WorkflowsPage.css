@@ -73,6 +73,17 @@
   color: white;
 }
 
+/* Submenu subheader for nested groups */
+.submenu-subheader {
+  color: #888;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 0.75rem 0 0.5rem;
+  padding: 0 1rem;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .workflows-header {

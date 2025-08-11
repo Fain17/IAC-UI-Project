@@ -8,10 +8,17 @@ import {
   uploadFileToStep,
   uploadZipToStep,
   createScriptForStep,
+  executeEntireWorkflow,
+  executeStepLocal,
+  executeStepDocker,
+  getStepExecutionStatus,
   WorkflowStep,
   CreateStepRequest,
   UpdateStepRequest,
-  WorkflowStepsResponse
+  WorkflowStepsResponse,
+  WorkflowExecutionResponse,
+  StepExecutionResponse,
+  StepExecutionStatusResponse
 } from '../../api';
 import './WorkflowDetailsPage.css';
 
@@ -27,6 +34,8 @@ interface Workflow {
 }
 
 type FileUploadMethod = 'none' | 'file' | 'zip' | 'script';
+
+type ExecutionType = 'local' | 'docker';
 
 const WorkflowDetailsPage: React.FC = () => {
   const { workflowId } = useParams<{ workflowId: string }>();
@@ -62,6 +71,13 @@ const WorkflowDetailsPage: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedZipFile, setSelectedZipFile] = useState<File | null>(null);
   const [scriptContent, setScriptContent] = useState('');
+
+  // Execution state
+  const [executionType, setExecutionType] = useState<ExecutionType>('local');
+  const [continueOnFailure, setContinueOnFailure] = useState<boolean>(false);
+  const [workflowExecution, setWorkflowExecution] = useState<WorkflowExecutionResponse | null>(null);
+  const [stepExecutions, setStepExecutions] = useState<Record<string, StepExecutionResponse>>({});
+  const [stepStatuses, setStepStatuses] = useState<Record<string, StepExecutionStatusResponse>>({});
 
   useEffect(() => {
     if (workflowId) {
@@ -104,13 +120,11 @@ const WorkflowDetailsPage: React.FC = () => {
       return;
     }
 
-    // Validate script filename when script upload method is selected
     if (fileUploadMethod === 'script' && !newStep.script_filename?.trim()) {
       setError('Script filename is required when creating a script');
       return;
     }
 
-    // Validate script content when script upload method is selected
     if (fileUploadMethod === 'script' && !scriptContent.trim()) {
       setError('Script content is required when creating a script');
       return;
@@ -120,14 +134,12 @@ const WorkflowDetailsPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      // First, create the step
       const response = await addWorkflowStep(workflowId!, newStep);
       
       if (response.data.success) {
         const createdStep = response.data.step;
         setSteps([...steps, createdStep]);
 
-        // Handle file upload based on selected method
         if (fileUploadMethod !== 'none') {
           try {
             switch (fileUploadMethod) {
@@ -149,7 +161,6 @@ const WorkflowDetailsPage: React.FC = () => {
             }
           } catch (uploadError: any) {
             console.error('Error uploading file:', uploadError);
-            // Don't fail the entire step creation if file upload fails
             setError(`Step created but file upload failed: ${uploadError.response?.data?.detail || 'Unknown error'}`);
           }
         }
@@ -182,7 +193,6 @@ const WorkflowDetailsPage: React.FC = () => {
       const response = await updateWorkflowStepById(workflowId!, editingStep.id, editStep);
       
       if (response.data.success) {
-        // Update the step in the local state
         setSteps(steps.map(step => 
           step.id === editingStep.id 
             ? { ...step, ...response.data.updated_step }
@@ -269,6 +279,51 @@ const WorkflowDetailsPage: React.FC = () => {
     }
   };
 
+  // Execution handlers
+  const handleExecuteWorkflow = async () => {
+    if (!workflowId) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const resp = await executeEntireWorkflow(workflowId, executionType, continueOnFailure);
+      setWorkflowExecution(resp.data);
+    } catch (err: any) {
+      console.error('Error executing workflow:', err);
+      setError(err.response?.data?.detail || 'Failed to execute workflow');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExecuteStep = async (stepId: string, type: ExecutionType) => {
+    if (!workflowId) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const resp = type === 'docker'
+        ? await executeStepDocker(workflowId, stepId)
+        : await executeStepLocal(workflowId, stepId);
+      setStepExecutions(prev => ({ ...prev, [stepId]: resp.data }));
+    } catch (err: any) {
+      console.error('Error executing step:', err);
+      setError(err.response?.data?.detail || 'Failed to execute step');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGetStepStatus = async (stepId: string) => {
+    if (!workflowId) return;
+    try {
+      setError(null);
+      const resp = await getStepExecutionStatus(workflowId, stepId);
+      setStepStatuses(prev => ({ ...prev, [stepId]: resp.data }));
+    } catch (err: any) {
+      console.error('Error fetching step status:', err);
+      setError(err.response?.data?.detail || 'Failed to fetch step status');
+    }
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -313,6 +368,58 @@ const WorkflowDetailsPage: React.FC = () => {
         )}
       </div>
 
+      {/* Execution Controls */}
+      <div className="execution-controls">
+        <div className="form-group inline">
+          <label htmlFor="executionType">Execution Type</label>
+          <select
+            id="executionType"
+            value={executionType}
+            onChange={(e) => setExecutionType(e.target.value as ExecutionType)}
+          >
+            <option value="local">Local</option>
+            <option value="docker">Docker</option>
+          </select>
+        </div>
+        <div className="form-group inline">
+          <label htmlFor="continueOnFailure">Continue On Failure</label>
+          <input
+            id="continueOnFailure"
+            type="checkbox"
+            checked={continueOnFailure}
+            onChange={(e) => setContinueOnFailure(e.target.checked)}
+          />
+        </div>
+        <button className="execute-workflow-button" onClick={handleExecuteWorkflow} disabled={loading}>
+          {loading ? 'Executing...' : 'Execute Entire Workflow'}
+        </button>
+      </div>
+
+      {workflowExecution && (
+        <div className="execution-summary">
+          <div className="summary-row">
+            <span>Status:</span>
+            <span className={`status-badge ${workflowExecution.status}`}>{workflowExecution.status}</span>
+          </div>
+          <div className="summary-row">
+            <span>Type:</span>
+            <span>{workflowExecution.execution_type}</span>
+          </div>
+          <div className="summary-row">
+            <span>Executed:</span>
+            <span>{workflowExecution.steps_executed}</span>
+          </div>
+          <div className="summary-row">
+            <span>Skipped:</span>
+            <span>{workflowExecution.steps_skipped}</span>
+          </div>
+          <div className="summary-row">
+            <span>Failed:</span>
+            <span>{workflowExecution.steps_failed}</span>
+          </div>
+        </div>
+      )}
+
       <div className="workflow-details-content">
         <div className="steps-section">
           <div className="steps-header">
@@ -331,72 +438,119 @@ const WorkflowDetailsPage: React.FC = () => {
             </div>
           ) : (
             <div className="steps-grid">
-              {steps.map((step) => (
-                <div key={step.id} className="step-card">
-                  <div className="step-card-header">
-                    <h3>{step.name}</h3>
-                    <div className="step-status">
-                      <span className={`status-badge ${step.is_active ? 'active' : 'inactive'}`}>
-                        {step.is_active ? 'Active' : 'Inactive'}
-                      </span>
+              {steps.map((step) => {
+                const stepExec = stepExecutions[step.id];
+                const stepStatus = stepStatuses[step.id];
+                return (
+                  <div key={step.id} className="step-card">
+                    <div className="step-card-header">
+                      <h3>{step.name}</h3>
+                      <div className="step-status">
+                        <span className={`status-badge ${step.is_active ? 'active' : 'inactive'}`}>
+                          {step.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  
-                  {step.description && (
-                    <p className="step-description">{step.description}</p>
-                  )}
-                  
-                  <div className="step-details">
-                    <div className="step-detail">
-                      <span className="detail-label">Order:</span>
-                      <span className="detail-value">{step.order}</span>
+                    
+                    {step.description && (
+                      <p className="step-description">{step.description}</p>
+                    )}
+                    
+                    <div className="step-details">
+                      <div className="step-detail">
+                        <span className="detail-label">Order:</span>
+                        <span className="detail-value">{step.order}</span>
+                      </div>
+                      {step.script_type && (
+                        <div className="step-detail">
+                          <span className="detail-label">Script Type:</span>
+                          <span className="detail-value">{step.script_type}</span>
+                        </div>
+                      )}
+                      {step.script_filename && (
+                        <div className="step-detail">
+                          <span className="detail-label">Script File:</span>
+                          <span className="detail-value">{step.script_filename}</span>
+                        </div>
+                      )}
+                      {step.run_command && (
+                        <div className="step-detail">
+                          <span className="detail-label">Run Command:</span>
+                          <span className="detail-value">{step.run_command}</span>
+                        </div>
+                      )}
+                      {step.dependencies && step.dependencies.length > 0 && (
+                        <div className="step-detail">
+                          <span className="detail-label">Dependencies:</span>
+                          <span className="detail-value">{step.dependencies.join(', ')}</span>
+                        </div>
+                      )}
+                      <div className="step-detail">
+                        <span className="detail-label">Created:</span>
+                        <span className="detail-value">{formatDate(step.created_at)}</span>
+                      </div>
                     </div>
-                    {step.script_type && (
-                      <div className="step-detail">
-                        <span className="detail-label">Script Type:</span>
-                        <span className="detail-value">{step.script_type}</span>
-                      </div>
-                    )}
-                    {step.script_filename && (
-                      <div className="step-detail">
-                        <span className="detail-label">Script File:</span>
-                        <span className="detail-value">{step.script_filename}</span>
-                      </div>
-                    )}
-                    {step.run_command && (
-                      <div className="step-detail">
-                        <span className="detail-label">Run Command:</span>
-                        <span className="detail-value">{step.run_command}</span>
-                      </div>
-                    )}
-                    {step.dependencies && step.dependencies.length > 0 && (
-                      <div className="step-detail">
-                        <span className="detail-label">Dependencies:</span>
-                        <span className="detail-value">{step.dependencies.join(', ')}</span>
-                      </div>
-                    )}
-                    <div className="step-detail">
-                      <span className="detail-label">Created:</span>
-                      <span className="detail-value">{formatDate(step.created_at)}</span>
-                    </div>
-                  </div>
 
-                  <div className="step-actions">
-                    <button 
-                      className="action-button edit"
-                      onClick={() => openEditStepModal(step)}
-                    >
-                      Edit
-                    </button>
-                    <button 
-                      className="action-button delete"
-                      onClick={() => handleDeleteStep(step.order)}
-                    >
-                      Delete
-                    </button>
+                    <div className="step-actions">
+                      <button 
+                        className="action-button edit"
+                        onClick={() => openEditStepModal(step)}
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        className="action-button status"
+                        onClick={() => handleGetStepStatus(step.id)}
+                      >
+                        Status
+                      </button>
+                      <button 
+                        className="action-button run"
+                        onClick={() => handleExecuteStep(step.id, 'local')}
+                        disabled={loading}
+                      >
+                        Run Local
+                      </button>
+                      <button 
+                        className="action-button run"
+                        onClick={() => handleExecuteStep(step.id, 'docker')}
+                        disabled={loading}
+                      >
+                        Run Docker
+                      </button>
+                      <button 
+                        className="action-button delete"
+                        onClick={() => handleDeleteStep(step.order)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+
+                    {(stepStatus || stepExec) && (
+                      <div className="step-execution-info">
+                        {stepStatus && (
+                          <div className="status-info">
+                            <div className="info-row"><span>Can Execute:</span><span>{stepStatus.can_execute ? 'Yes' : 'No'}</span></div>
+                            {stepStatus.validation_error && (
+                              <div className="info-row"><span>Error:</span><span>{stepStatus.validation_error}</span></div>
+                            )}
+                          </div>
+                        )}
+                        {stepExec && (
+                          <div className="exec-info">
+                            <div className="info-row"><span>Status:</span><span>{stepExec.status}</span></div>
+                            <div className="info-row"><span>Time:</span><span>{stepExec.execution_time}s</span></div>
+                            <div className="info-row"><span>Return Code:</span><span>{stepExec.return_code}</span></div>
+                            {stepExec.output && (
+                              <pre className="exec-output">{stepExec.output}</pre>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -508,7 +662,6 @@ const WorkflowDetailsPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* File Upload Section */}
               {fileUploadMethod === 'file' && (
                 <div className="form-group">
                   <label htmlFor="fileUpload">Select File</label>

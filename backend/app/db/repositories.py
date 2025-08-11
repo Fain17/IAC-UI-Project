@@ -107,6 +107,108 @@ class ConfigMappingRepository:
             logger.error(f"Error deleting mapping: {e}")
             return False
 
+class DockerImageMappingRepository:
+    """Repository for Docker image mappings for script types."""
+
+    @staticmethod
+    async def upsert(types: List[str], image: str) -> Optional[int]:
+        """Create or update a mapping for a set of script types. Returns mapping id on success."""
+        if not db_service.client:
+            return None
+        try:
+            normalized = sorted(set([t.strip().lower() for t in types if t]))
+            types_json = json.dumps(normalized, separators=(",", ":"))
+
+            # Check if mapping with exact same types exists
+            existing = await db_service.client.execute(
+                "SELECT id FROM docker_image_mappings WHERE types = ?",
+                [types_json]
+            )
+            if existing.rows:
+                mapping_id = existing.rows[0][0]
+                await db_service.client.execute(
+                    "UPDATE docker_image_mappings SET image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    [image, mapping_id]
+                )
+                return int(mapping_id)
+
+            # Insert new mapping
+            result = await db_service.client.execute(
+                "INSERT INTO docker_image_mappings (types, image) VALUES (?, ?)",
+                [types_json, image]
+            )
+            # libsql returns last_insert_rowid as rows? Fallback to reselect
+            row = await db_service.client.execute(
+                "SELECT id FROM docker_image_mappings WHERE types = ? AND image = ? ORDER BY id DESC LIMIT 1",
+                [types_json, image]
+            )
+            return int(row.rows[0][0]) if row.rows else None
+        except Exception as e:
+            logger.error(f"Error upserting docker image mapping: {e}")
+            return None
+
+    @staticmethod
+    async def list_all() -> List[Dict]:
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, types, image, created_at, updated_at FROM docker_image_mappings ORDER BY id DESC"
+            )
+            mappings: List[Dict] = []
+            for row in result.rows:
+                try:
+                    types = json.loads(row[1])
+                except Exception:
+                    types = []
+                mappings.append({
+                    "id": int(row[0]),
+                    "types": types,
+                    "image": str(row[2]),
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
+            return mappings
+        except Exception as e:
+            logger.error(f"Error listing docker image mappings: {e}")
+            return []
+
+    @staticmethod
+    async def get_image_for_type(script_type: str) -> Optional[str]:
+        """Return the most recent image that includes the given script type in its types list."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT types, image FROM docker_image_mappings ORDER BY updated_at DESC, id DESC"
+            )
+            st = (script_type or "").strip().lower()
+            for row in result.rows:
+                try:
+                    types = json.loads(row[0])
+                except Exception:
+                    types = []
+                if st in types:
+                    return str(row[1])
+            return None
+        except Exception as e:
+            logger.error(f"Error resolving docker image for type {script_type}: {e}")
+            return None
+
+    @staticmethod
+    async def delete(mapping_id: int) -> bool:
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM docker_image_mappings WHERE id = ?",
+                [mapping_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting docker image mapping: {e}")
+            return False
+
 class UserRepository:
     """Repository for user operations."""
     
