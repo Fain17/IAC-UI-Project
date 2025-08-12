@@ -5,7 +5,7 @@ import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequ
 import './SettingsPage.css';
 
 interface User {
-  id: number;
+  id: string;
   username: string;
   email: string;
   is_active: boolean;
@@ -31,7 +31,7 @@ interface UserPermission {
 }
 
 interface UserGroup {
-  id: number;
+  id: string;
   name: string;
   description: string;
   member_count: number;
@@ -156,7 +156,7 @@ const SettingsPage: React.FC = () => {
       const groupsResp = (resp.data as any)?.groups || (resp.data as any) || [];
 
       const baseGroups: UserGroup[] = groupsResp.map((g: any) => ({
-        id: Number(g.id),
+        id: g.id,
         name: g.name,
         description: g.description || '',
         member_count: 0,
@@ -222,19 +222,14 @@ const SettingsPage: React.FC = () => {
 
   const [selectedUserForGroups, setSelectedUserForGroups] = useState<User | null>(null);
   const [userGroupsForSelected, setUserGroupsForSelected] = useState<AdminGroup[]>([]);
-  const [assignGroupId, setAssignGroupId] = useState<number | ''>('');
+  const [assignGroupId, setAssignGroupId] = useState<string>('');
 
   const openUserGroups = async (user: User) => {
     setSelectedUserForGroups(user);
     try {
       const resp = await getUserGroups(user.id);
       const groupsResp = (resp.data as any)?.groups || (resp.data as any) || [];
-      // Ensure group IDs are numbers
-      const groupsWithNumericIds = groupsResp.map((g: any) => ({
-        ...g,
-        id: Number(g.id)
-      }));
-      setUserGroupsForSelected(groupsWithNumericIds);
+      setUserGroupsForSelected(groupsResp);
     } catch (error: any) {
       setMessage({ type: 'error', text: 'Failed to load user groups: ' + (error.response?.data?.detail || error.message) });
     }
@@ -244,7 +239,7 @@ const SettingsPage: React.FC = () => {
     if (!selectedUserForGroups || assignGroupId === '') return;
     setLoading(true);
     try {
-      await addUserToGroup(selectedUserForGroups.id, Number(assignGroupId));
+      await addUserToGroup(selectedUserForGroups.id, assignGroupId);
       await openUserGroups(selectedUserForGroups);
       setAssignGroupId('');
       setMessage({ type: 'success', text: 'User added to group' });
@@ -256,7 +251,7 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleRemoveUserGroup = async (groupId: number) => {
+  const handleRemoveUserGroup = async (groupId: string) => {
     if (!selectedUserForGroups) return;
     setLoading(true);
     try {
@@ -669,7 +664,7 @@ const SettingsPage: React.FC = () => {
                              user.role === 'viewer' ? 'Viewer' : 
                              user.role || 'User'}
                           </span></td>
-                          <td>{user.groups && user.groups.length > 0 ? user.groups.join(', ') : 'No groups'}</td>
+                          <td>{user.groups && user.groups.length > 0 ? user.groups.map(g => g.name).join(', ') : 'No groups'}</td>
                           <td>
                             <span className={`status-badge ${user.is_active ? 'active' : 'inactive'}`}>
                               {user.is_active ? 'Active' : 'Inactive'}
@@ -869,7 +864,7 @@ const SettingsPage: React.FC = () => {
   // Group Users management (under Groups tab)
   const [selectedGroupForUsers, setSelectedGroupForUsers] = useState<UserGroup | null>(null);
   const [groupUsers, setGroupUsers] = useState<AdminGroupUser[]>([]);
-  const [selectedUserIdToAdd, setSelectedUserIdToAdd] = useState<number | ''>('');
+  const [selectedUserIdToAdd, setSelectedUserIdToAdd] = useState<string>('');
 
   const openGroupUsersForGroup = async (group: UserGroup) => {
     setSelectedGroupForUsers(group);
@@ -890,7 +885,7 @@ const SettingsPage: React.FC = () => {
     if (!selectedGroupForUsers || selectedUserIdToAdd === '') return;
     setLoading(true);
     try {
-      await addUserToGroup(Number(selectedUserIdToAdd), selectedGroupForUsers.id);
+      await addUserToGroup(selectedUserIdToAdd, selectedGroupForUsers.id);
       await openGroupUsersForGroup(selectedGroupForUsers);
       await loadUserGroups();
       setSelectedUserIdToAdd('');
@@ -902,7 +897,7 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleRemoveUserFromSelectedGroup = async (userId: number) => {
+  const handleRemoveUserFromSelectedGroup = async (userId: string) => {
     if (!selectedGroupForUsers) return;
     setLoading(true);
     try {
@@ -1088,7 +1083,7 @@ const SettingsPage: React.FC = () => {
               <div className="form-group">
                 <label>Add User to Group</label>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <select value={selectedUserIdToAdd} onChange={(e) => setSelectedUserIdToAdd(e.target.value ? Number(e.target.value) : '')}>
+                  <select value={selectedUserIdToAdd} onChange={(e) => setSelectedUserIdToAdd(e.target.value)}>
                     <option value="">Select user</option>
                     {users
                       .filter((u) => !groupUsers.some((gu) => gu.id === u.id))

@@ -13,7 +13,7 @@ const AssignWorkflowsPage: React.FC = () => {
   const [showUserPermissionsModal, setShowUserPermissionsModal] = useState(false);
   const [editingUser, setEditingUser] = useState<WorkflowPermission | null>(null);
   const [editForm, setEditForm] = useState<{ role: 'admin' | 'manager' | 'viewer'; is_active: boolean }>({ role: 'viewer', is_active: true });
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [hasForcedAdmin, setHasForcedAdmin] = useState<boolean>(false);
 
   // Real workflow permissions and sharing data
@@ -48,7 +48,7 @@ const AssignWorkflowsPage: React.FC = () => {
     }
   };
 
-  const forceSetCurrentUserToAdmin = async (userId: number) => {
+  const forceSetCurrentUserToAdmin = async (userId: string) => {
     try {
       console.log('🔐 Force setting current user to admin:', userId);
       setHasForcedAdmin(true); // Prevent repeated calls
@@ -117,7 +117,7 @@ const AssignWorkflowsPage: React.FC = () => {
 
   const loadGroupMemberCounts = async (groupsData: AdminGroup[]) => {
     try {
-      const memberCounts = new Map<number, number>();
+      const memberCounts = new Map<string, number>();
       
       // Fetch member counts for each group
       const memberCountPromises = groupsData.map(async (group) => {
@@ -202,7 +202,7 @@ const AssignWorkflowsPage: React.FC = () => {
     }
   };
 
-  const handleShareWithGroup = async (workflowId: string, groupId: number) => {
+  const handleShareWithGroup = async (workflowId: string, groupId: string) => {
     try {
       setLoading(true);
       await shareWorkflowWithGroup(workflowId, groupId);
@@ -230,7 +230,7 @@ const AssignWorkflowsPage: React.FC = () => {
     }
   };
 
-  const handleUnshareFromGroup = async (workflowId: string, groupId: number) => {
+  const handleUnshareFromGroup = async (workflowId: string, groupId: string) => {
     try {
       setLoading(true);
       await unshareWorkflowWithGroup(workflowId, groupId);

@@ -1,7 +1,7 @@
 import wsTokenManager from './websocketTokenManager';
 
 interface UserData {
-    id?: number;
+    id?: string;
     username?: string;
     email?: string;
     isAdmin?: boolean;

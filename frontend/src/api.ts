@@ -78,7 +78,7 @@ export const checkFirstUser = (): Promise<AxiosResponse> =>
 
 // User Management Interfaces
 export interface AdminUser {
-  id: number;
+  id: string;
   username: string;
   email: string;
   is_active: boolean;
@@ -108,7 +108,7 @@ export const getAdminUsers = (): Promise<AxiosResponse<AdminUsersResponse>> =>
 export const createAdminUser = (userData: CreateUserRequest): Promise<AxiosResponse<AdminUser>> => 
   API.post('/admin/users', userData);
 
-export const getAdminUser = (userId: number): Promise<AxiosResponse<AdminUser>> => 
+export const getAdminUser = (userId: string): Promise<AxiosResponse<AdminUser>> =>
   API.get(`/admin/users/${userId}`);
 
 export interface UpdateUserPermissionsRequest {
@@ -118,7 +118,7 @@ export interface UpdateUserPermissionsRequest {
 
 // Update user permissions using the new API format
 // Payload: { "role": "admin" | "manager" | "viewer", "is_active": boolean }
-export const updateUserPermissionsNew = (userId: number, permissions: UpdateUserPermissionsRequest): Promise<AxiosResponse<AdminUser>> => {
+export const updateUserPermissionsNew = (userId: string, permissions: UpdateUserPermissionsRequest): Promise<AxiosResponse<AdminUser>> => {
   console.log('🚀 API: updateUserPermissionsNew called with:', { userId, permissions });
   console.log('🚀 API: Sending payload:', permissions);
   return API.put(`/admin/users/${userId}/permissions`, permissions);
@@ -128,10 +128,10 @@ export interface UpdateUserActiveStatusRequest {
   is_active: boolean;
 }
 
-export const updateUserActiveStatus = (userId: number, isActive: boolean): Promise<AxiosResponse<AdminUser>> => 
+export const updateUserActiveStatus = (userId: string, isActive: boolean): Promise<AxiosResponse<AdminUser>> =>
   API.patch(`/admin/users/${userId}/active-status`, { is_active: isActive });
 
-export const getUserPermissions = (userId: number): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> => 
+export const getUserPermissions = (userId: string): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> =>
   API.get(`/admin/users/${userId}/permissions`);
 
 export const getCurrentUserPermissions = (): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> => 
@@ -164,7 +164,7 @@ export const getAllUsersPermissionsNew = (): Promise<AxiosResponse<{
 }>> => 
   API.get('/admin/users/permissions/all');
 
-export const deleteUser = (userId: number): Promise<AxiosResponse> => 
+export const deleteUser = (userId: string): Promise<AxiosResponse> =>
   API.delete(`/admin/users/${userId}`);
 
 // Workflow Step Management APIs
@@ -420,7 +420,7 @@ export const getStepExecutionStatus = (
   API.get(`/workflow/${workflowId}/steps/${stepId}/execute/status`); 
 
 export interface AdminGroup {
-  id: number;
+  id: string;
   name: string;
   description: string;
   created_at?: string;
@@ -428,7 +428,7 @@ export interface AdminGroup {
 }
 
 export interface AdminGroupUser {
-  id: number;
+  id: string;
   username: string;
   email: string;
   is_active: boolean;
@@ -441,29 +441,29 @@ export const createAdminGroup = (group: { name: string; description?: string }):
 export const getAdminGroups = (): Promise<AxiosResponse<{ groups: AdminGroup[] } | AdminGroup[]>> =>
   API.get('/admin/groups');
 
-export const getUserGroups = (userId: number): Promise<AxiosResponse<{ groups: AdminGroup[] } | AdminGroup[]>> =>
+export const getUserGroups = (userId: string): Promise<AxiosResponse<{ groups: AdminGroup[] } | AdminGroup[]>> =>
   API.get(`/admin/users/${userId}/groups`);
 
-export const addUserToGroup = (userId: number, groupId: number): Promise<AxiosResponse> =>
+export const addUserToGroup = (userId: string, groupId: string): Promise<AxiosResponse> =>
   API.post(`/admin/users/${userId}/groups/${groupId}`);
 
-export const removeUserFromGroup = (userId: number, groupId: number): Promise<AxiosResponse> =>
+export const removeUserFromGroup = (userId: string, groupId: string): Promise<AxiosResponse> =>
   API.delete(`/admin/users/${userId}/groups/${groupId}`);
 
-export const getGroupUsers = (groupId: number): Promise<AxiosResponse<{ users: AdminGroupUser[] } | AdminGroupUser[]>> =>
+export const getGroupUsers = (groupId: string): Promise<AxiosResponse<{ users: AdminGroupUser[] } | AdminGroupUser[]>> =>
   API.get(`/admin/groups/${groupId}/users`);
 
-export const deleteAdminGroup = (groupId: number): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+export const deleteAdminGroup = (groupId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
   API.delete(`/admin/groups/${groupId}`);
 
-export const updateAdminGroup = (groupId: number, groupData: { name: string; description?: string }): Promise<AxiosResponse<AdminGroup>> =>
+export const updateAdminGroup = (groupId: string, groupData: { name: string; description?: string }): Promise<AxiosResponse<AdminGroup>> =>
   API.put(`/admin/groups/${groupId}`, groupData);
 
 // Workflow Sharing APIs
-export const shareWorkflowWithGroup = (workflowId: string, groupId: number): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+export const shareWorkflowWithGroup = (workflowId: string, groupId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
   API.post(`/workflow/${workflowId}/share/groups/${groupId}`);
 
-export const unshareWorkflowWithGroup = (workflowId: string, groupId: number): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+export const unshareWorkflowWithGroup = (workflowId: string, groupId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
   API.delete(`/workflow/${workflowId}/share/groups/${groupId}`);
 
 // Get workflow permissions and sharing data
@@ -488,7 +488,7 @@ export const getAllWorkflowsWithPermissions = (): Promise<AxiosResponse<{
 
 // Dummy data interfaces for workflow permissions
 export interface WorkflowPermission {
-  user_id: number;
+  user_id: string;
   username: string;
   email: string;
   permission: 'read' | 'write' | 'admin';
@@ -496,7 +496,7 @@ export interface WorkflowPermission {
 }
 
 export interface WorkflowGroupShare {
-  group_id: number;
+  group_id: string;
   group_name: string;
   group_description?: string;
   is_shared: boolean;
@@ -517,7 +517,7 @@ export interface Workflow {
   id: string;
   name: string;
   description?: string;
-  user_id: number;
+  user_id: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
