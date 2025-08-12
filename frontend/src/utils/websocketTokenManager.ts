@@ -25,6 +25,7 @@ class WebSocketTokenManager {
   private maxReconnectAttempts: number = 5;
   private reconnectDelay: number = 1000;
   private isConnected: boolean = false;
+  private isConnecting: boolean = false;
   private tokenUpdateCallbacks: TokenUpdateCallback[] = [];
   private errorCallbacks: ErrorCallback[] = [];
 
@@ -33,28 +34,50 @@ class WebSocketTokenManager {
    */
   async connect(token?: string): Promise<void> {
     try {
-      // Check if already connected
-      if (this.isConnected && this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-        console.log('WebSocket already connected, skipping new connection');
+      // Check if already connected with more robust checking
+      if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+        console.log('🔌 WebSocket already connected and open, skipping new connection');
         return;
       }
 
+      // Check if we're in the process of connecting
+      if (this.isConnecting) {
+        console.log('🔌 WebSocket connection already in progress, skipping new connection');
+        return;
+      }
+
+      // Check if we're in the process of connecting
+      if (this.websocket && this.websocket.readyState === WebSocket.CONNECTING) {
+        console.log('🔌 WebSocket connection already in progress, skipping new connection');
+        return;
+      }
+
+      // Set connecting flag
+      this.isConnecting = true;
+
       // Disconnect any existing connection first
       if (this.websocket) {
+        console.log('🔌 Disconnecting existing WebSocket before new connection');
         this.disconnect();
+        // Small delay to ensure clean disconnection
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
       const accessToken = token || localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
       
       if (!accessToken) {
+        this.isConnecting = false;
         throw new Error('No access token available');
       }
 
+      console.log('🔌 Creating new WebSocket connection...');
       const wsUrl = `ws://localhost:8000/ws/token-monitor?token=${accessToken}`;
       this.websocket = new WebSocket(wsUrl);
 
       this.websocket.onopen = () => {
+        console.log('🔌 WebSocket connection opened successfully');
         this.isConnected = true;
+        this.isConnecting = false;
         this.reconnectAttempts = 0;
         this.reconnectDelay = 1000;
       };
@@ -62,6 +85,7 @@ class WebSocketTokenManager {
       this.websocket.onmessage = (event) => {
         try {
           const parsedMessage = JSON.parse(event.data);
+          console.log('🔌 WebSocket message received:', parsedMessage);
           this.handleMessage(parsedMessage);
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error);
@@ -69,15 +93,21 @@ class WebSocketTokenManager {
       };
 
       this.websocket.onclose = (event) => {
+        console.log('🔌 WebSocket connection closed:', event.code, event.reason);
         this.isConnected = false;
+        this.isConnecting = false;
         this.handleDisconnection();
       };
 
       this.websocket.onerror = (error) => {
+        console.error('🔌 WebSocket error:', error);
+        this.isConnecting = false;
         this.handleError(error);
       };
 
     } catch (error) {
+      this.isConnecting = false;
+      console.error('🔌 Failed to create WebSocket connection:', error);
       this.handleError(error);
     }
   }
@@ -215,6 +245,7 @@ class WebSocketTokenManager {
    * Disconnect WebSocket
    */
   disconnect(): void {
+    console.log('🔌 Disconnecting WebSocket...');
     if (this.websocket) {
       // Remove event listeners to prevent memory leaks
       this.websocket.onopen = null;
@@ -227,8 +258,10 @@ class WebSocketTokenManager {
       this.websocket = null;
     }
     this.isConnected = false;
+    this.isConnecting = false;
     this.reconnectAttempts = 0;
     this.removeCallbacks();
+    console.log('🔌 WebSocket disconnected');
   }
 
   /**
@@ -249,7 +282,19 @@ class WebSocketTokenManager {
    * Check if WebSocket is connected
    */
   getConnected(): boolean {
-    return this.isConnected && this.websocket !== null && this.websocket.readyState === WebSocket.OPEN;
+    const isConnected = this.websocket !== null && this.websocket.readyState === WebSocket.OPEN;
+    
+    // Only log when there's a state change to reduce noise
+    if (isConnected !== this.isConnected) {
+      console.log('🔌 WebSocket connection state changed:', { 
+        wasConnected: this.isConnected,
+        isConnected: isConnected,
+        readyState: this.websocket?.readyState
+      });
+      this.isConnected = isConnected;
+    }
+    
+    return isConnected;
   }
 
   /**

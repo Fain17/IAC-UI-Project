@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import tokenManager from '../../utils/tokenManager';
-import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequest, AdminUsersResponse, updateUserPermissions as updateUserPermissionsAPI, UpdateUserPermissionsRequest, deleteUser, updateUserActiveStatus, getAllUsersPermissionsNew } from '../../api';
+import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequest, AdminUsersResponse, updateUserPermissionsNew as updateUserPermissionsAPI, UpdateUserPermissionsRequest, deleteUser, updateUserActiveStatus, getAllUsersPermissionsNew, getAdminGroups, createAdminGroup, addUserToGroup, removeUserFromGroup, getUserGroups, AdminGroup, AdminGroupUser, getGroupUsers, deleteAdminGroup, updateAdminGroup } from '../../api';
 import './SettingsPage.css';
 
 interface User {
@@ -12,19 +12,22 @@ interface User {
   is_admin: boolean;
   created_at: string;
   updated_at: string;
-  permission_level: string;
+  role: string;
   groups: string[];
 }
 
 interface UserPermission {
-  user_id: number;
+  id: string;
   username: string;
   email: string;
   is_active: boolean;
   is_admin: boolean;
-  permission_level: string;
-  permission_created_at: string;
-  permission_updated_at: string;
+  created_at: string;
+  updated_at: string;
+  role: string;
+  groups: string[];
+  role_permissions: string[];
+  description: string;
 }
 
 interface UserGroup {
@@ -59,7 +62,16 @@ const SettingsPage: React.FC = () => {
   const [userIsAdmin, setUserIsAdmin] = useState<boolean>(false);
 
   // State for active submenu
+  const location = useLocation();
   const [activeSubMenu, setActiveSubMenu] = useState<string>('general');
+  const derivedSubMenu = useMemo<string>(() => {
+    if (location.pathname.startsWith('/settings/users')) return 'users';
+    if (location.pathname.startsWith('/settings/groups')) return 'groups';
+    if (location.pathname.startsWith('/settings/roles')) return 'roles';
+    if (location.pathname.startsWith('/settings/permissions')) return 'permissions';
+    return 'general';
+  }, [location.pathname]);
+  useEffect(() => { setActiveSubMenu(derivedSubMenu); }, [derivedSubMenu]);
 
   // State for general settings
   const [notifications, setNotifications] = useState(true);
@@ -100,30 +112,26 @@ const SettingsPage: React.FC = () => {
       const permissionsResponse = await getAllUsersPermissionsNew();
       console.log('✅ Permissions response:', permissionsResponse);
       
-      const allPermissions = permissionsResponse.data.user_permissions || [];
+      const allPermissions = permissionsResponse.data.permissions || [];
       console.log('📋 All permissions data:', allPermissions);
       
-      // Create a map of user ID to permissions for quick lookup
+      // Create a map of username to permissions for quick lookup
       const permissionsMap = new Map(
-        allPermissions.map((perm: UserPermission) => [perm.user_id, perm])
+        allPermissions.map((perm: UserPermission) => [perm.username, perm])
       );
       
-      // Merge users with their permissions
-      const usersWithPermissions = usersData.map((user: User) => {
-        const userPermissions = permissionsMap.get(user.id);
-        if (userPermissions) {
-          return {
-            ...user,
-            permission_level: userPermissions.permission_level || 'viewer',
-            is_active: userPermissions.is_active !== undefined ? userPermissions.is_active : user.is_active,
-            is_admin: userPermissions.is_admin !== undefined ? userPermissions.is_admin : user.is_admin
-          };
-        }
-        return user;
+      // Merge users with their permissions from the new API
+      const usersWithData = usersData.map((user: any) => {
+        const userPermissions = permissionsMap.get(user.username);
+        const role = userPermissions?.role || 'viewer';
+        const is_active = userPermissions?.is_active !== undefined ? userPermissions.is_active : user.is_active;
+        const is_admin = userPermissions?.is_admin !== undefined ? userPermissions.is_admin : user.is_admin;
+        const groups = userPermissions?.groups || [];
+        return { ...user, role, is_active, is_admin, groups } as User;
       });
       
-      console.log('👥 Users with permissions:', usersWithPermissions);
-      setUsers(usersWithPermissions);
+      console.log('👥 Users with permissions:', usersWithData);
+      setUsers(usersWithData);
     } catch (error: any) {
       console.error('❌ Error loading users:', error);
       console.error('❌ Error response:', error.response);
@@ -144,17 +152,124 @@ const SettingsPage: React.FC = () => {
   const loadUserGroups = useCallback(async () => {
     setLoading(true);
     try {
-      // Mock data for now
-      setUserGroups([
-        { id: 1, name: 'Administrators', description: 'System administrators', member_count: 2, created_at: '2024-01-01' },
-        { id: 2, name: 'Users', description: 'Regular users', member_count: 5, created_at: '2024-01-01' }
-      ]);
+      const resp = await getAdminGroups();
+      const groupsResp = (resp.data as any)?.groups || (resp.data as any) || [];
+
+      const baseGroups: UserGroup[] = groupsResp.map((g: any) => ({
+        id: Number(g.id),
+        name: g.name,
+        description: g.description || '',
+        member_count: 0,
+        created_at: g.created_at || new Date().toISOString(),
+      }));
+
+      // Fetch member counts per group
+      const groupsWithCounts = await Promise.all(
+        baseGroups.map(async (g) => {
+          try {
+            const usersResp = await getGroupUsers(g.id);
+            const data: any = usersResp.data;
+            const count = typeof data?.count === 'number'
+              ? data.count
+              : Array.isArray((data && data.users))
+                ? data.users.length
+                : Array.isArray(data)
+                  ? data.length
+                  : 0;
+            return { ...g, member_count: count } as UserGroup;
+          } catch (e) {
+            return g;
+          }
+        })
+      );
+
+      setUserGroups(groupsWithCounts);
     } catch (error: any) {
-      setMessage({ type: 'error', text: 'Failed to load user groups: ' + error.message });
+      setMessage({ type: 'error', text: 'Failed to load user groups: ' + (error.response?.data?.detail || error.message) });
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Group management state and handlers
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [newGroup, setNewGroup] = useState<{ name: string; description: string }>({ name: '', description: '' });
+  
+  // Edit group state and handlers
+  const [showEditGroup, setShowEditGroup] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<UserGroup | null>(null);
+  const [editGroupData, setEditGroupData] = useState<{ name: string; description: string }>({ name: '', description: '' });
+
+  const handleCreateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGroup.name.trim()) {
+      setMessage({ type: 'error', text: 'Group name is required' });
+      return;
+    }
+    setLoading(true);
+    try {
+      await createAdminGroup({ name: newGroup.name.trim(), description: newGroup.description.trim() });
+      setMessage({ type: 'success', text: 'Group created successfully!' });
+      setShowCreateGroup(false);
+      setNewGroup({ name: '', description: '' });
+      await loadUserGroups();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to create group: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const [selectedUserForGroups, setSelectedUserForGroups] = useState<User | null>(null);
+  const [userGroupsForSelected, setUserGroupsForSelected] = useState<AdminGroup[]>([]);
+  const [assignGroupId, setAssignGroupId] = useState<number | ''>('');
+
+  const openUserGroups = async (user: User) => {
+    setSelectedUserForGroups(user);
+    try {
+      const resp = await getUserGroups(user.id);
+      const groupsResp = (resp.data as any)?.groups || (resp.data as any) || [];
+      // Ensure group IDs are numbers
+      const groupsWithNumericIds = groupsResp.map((g: any) => ({
+        ...g,
+        id: Number(g.id)
+      }));
+      setUserGroupsForSelected(groupsWithNumericIds);
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to load user groups: ' + (error.response?.data?.detail || error.message) });
+    }
+  };
+
+  const handleAssignGroup = async () => {
+    if (!selectedUserForGroups || assignGroupId === '') return;
+    setLoading(true);
+    try {
+      await addUserToGroup(selectedUserForGroups.id, Number(assignGroupId));
+      await openUserGroups(selectedUserForGroups);
+      setAssignGroupId('');
+      setMessage({ type: 'success', text: 'User added to group' });
+      await loadUsers();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to add user to group: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveUserGroup = async (groupId: number) => {
+    if (!selectedUserForGroups) return;
+    setLoading(true);
+    try {
+      await removeUserFromGroup(selectedUserForGroups.id, groupId);
+      await openUserGroups(selectedUserForGroups);
+      setMessage({ type: 'success', text: 'User removed from group' });
+      await loadUsers();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to remove user from group: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Load roles function
   const loadRoles = useCallback(async () => {
@@ -329,9 +444,9 @@ const SettingsPage: React.FC = () => {
             </div>
             <div className="form-row">
               <div className="form-group">
-                <label htmlFor="permission_level">Permission Level</label>
+                <label htmlFor="role">Role</label>
                 <select
-                  id="permission_level"
+                  id="role"
                   value={formData.role}
                   onChange={(e) => setFormData({...formData, role: e.target.value})}
                 >
@@ -382,7 +497,7 @@ const SettingsPage: React.FC = () => {
 
   const EditUserForm: React.FC = () => {
     const [formData, setFormData] = useState({
-      permission_level: editingUser?.permission_level || 'viewer',
+      role: editingUser?.role || 'viewer',
       is_active: editingUser?.is_active ?? true
     });
 
@@ -394,7 +509,8 @@ const SettingsPage: React.FC = () => {
       try {
         // Update permissions using PUT /admin/users/{user_id}/permissions
         await updateUserPermissionsAPI(editingUser.id, {
-          permission_level: formData.permission_level
+          role: formData.role as 'admin' | 'manager' | 'viewer',
+          is_active: formData.is_active
         });
 
         // Update active status using PATCH /admin/users/{user_id}/active-status
@@ -428,11 +544,11 @@ const SettingsPage: React.FC = () => {
           </div>
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label htmlFor="permission_level">Permission Level</label>
+              <label htmlFor="role">Role</label>
               <select
-                id="permission_level"
-                value={formData.permission_level}
-                onChange={(e) => setFormData({...formData, permission_level: e.target.value})}
+                id="role"
+                value={formData.role}
+                onChange={(e) => setFormData({...formData, role: e.target.value})}
               >
                 <option value="viewer">Viewer</option>
                 <option value="manager">Manager</option>
@@ -547,11 +663,11 @@ const SettingsPage: React.FC = () => {
                         <tr key={user.id}>
                           <td>{user.username}</td>
                           <td>{user.email}</td>
-                          <td><span className={`permission-badge ${user.is_admin ? 'admin' : (user.permission_level || 'viewer').toLowerCase()}`}>
+                          <td><span className={`permission-badge ${user.is_admin ? 'admin' : (user.role || 'viewer').toLowerCase()}`}>
                             {user.is_admin ? 'Admin' : 
-                             user.permission_level === 'manager' ? 'Manager' : 
-                             user.permission_level === 'viewer' ? 'Viewer' : 
-                             user.permission_level || 'User'}
+                             user.role === 'manager' ? 'Manager' : 
+                             user.role === 'viewer' ? 'Viewer' : 
+                             user.role || 'User'}
                           </span></td>
                           <td>{user.groups && user.groups.length > 0 ? user.groups.join(', ') : 'No groups'}</td>
                           <td>
@@ -563,6 +679,7 @@ const SettingsPage: React.FC = () => {
                           {userIsAdmin && (
                             <td>
                               <button className="action-button edit" onClick={() => handleEditUser(user)}>Edit</button>
+                              {/* Removed per request: Manage Groups moved to Groups page */}
                               {!user.is_admin && <button className="action-button delete" onClick={() => handleDeleteUser(user)}>Delete</button>}
                             </td>
                           )}
@@ -590,7 +707,7 @@ const SettingsPage: React.FC = () => {
                 <h2>User Groups</h2>
                 {userIsAdmin && (
                   <button 
-                    onClick={() => setShowGroupForm(true)}
+                    onClick={() => setShowCreateGroup(true)}
                     className="create-button"
                   >
                     ➕ Add Group
@@ -621,8 +738,9 @@ const SettingsPage: React.FC = () => {
                           <td>{new Date(group.created_at).toLocaleDateString()}</td>
                           {userIsAdmin && (
                             <td>
-                              <button className="action-button edit">Edit</button>
-                              <button className="action-button delete">Delete</button>
+                              <button className="action-button" onClick={() => openGroupUsersForGroup(group)}>Manage Users</button>
+                              <button className="action-button edit" onClick={() => handleEditGroup(group)}>Edit</button>
+                              <button className="action-button delete" onClick={() => handleDeleteGroup(group)}>Delete</button>
                             </td>
                           )}
                         </tr>
@@ -748,53 +866,108 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  // Group Users management (under Groups tab)
+  const [selectedGroupForUsers, setSelectedGroupForUsers] = useState<UserGroup | null>(null);
+  const [groupUsers, setGroupUsers] = useState<AdminGroupUser[]>([]);
+  const [selectedUserIdToAdd, setSelectedUserIdToAdd] = useState<number | ''>('');
+
+  const openGroupUsersForGroup = async (group: UserGroup) => {
+    setSelectedGroupForUsers(group);
+    try {
+      const resp = await getGroupUsers(group.id);
+      const list: AdminGroupUser[] = (resp.data as any)?.users || (resp.data as any) || [];
+      setGroupUsers(list);
+      // Ensure we have full users list for add dropdown
+      if (!users || users.length === 0) {
+        await loadUsers();
+      }
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to load group users: ' + (error.response?.data?.detail || error.message) });
+    }
+  };
+
+  const handleAddUserToSelectedGroup = async () => {
+    if (!selectedGroupForUsers || selectedUserIdToAdd === '') return;
+    setLoading(true);
+    try {
+      await addUserToGroup(Number(selectedUserIdToAdd), selectedGroupForUsers.id);
+      await openGroupUsersForGroup(selectedGroupForUsers);
+      await loadUserGroups();
+      setSelectedUserIdToAdd('');
+      setMessage({ type: 'success', text: 'User added to group' });
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to add user: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveUserFromSelectedGroup = async (userId: number) => {
+    if (!selectedGroupForUsers) return;
+    setLoading(true);
+    try {
+      await removeUserFromGroup(userId, selectedGroupForUsers.id);
+      await openGroupUsersForGroup(selectedGroupForUsers);
+      await loadUserGroups();
+      setMessage({ type: 'success', text: 'User removed from group' });
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to remove user: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteGroup = async (group: UserGroup) => {
+    // Confirm deletion
+    if (!window.confirm(`Are you sure you want to delete group "${group.name}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await deleteAdminGroup(group.id);
+      setMessage({ type: 'success', text: `Group "${group.name}" deleted successfully!` });
+      await loadUserGroups(); // Refresh the groups list
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to delete group: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditGroup = (group: UserGroup) => {
+    setEditingGroup(group);
+    setEditGroupData({ name: group.name, description: group.description });
+    setShowEditGroup(true);
+  };
+
+  const handleUpdateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGroup || !editGroupData.name.trim()) {
+      setMessage({ type: 'error', text: 'Group name is required' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await updateAdminGroup(editingGroup.id, { 
+        name: editGroupData.name.trim(), 
+        description: editGroupData.description.trim() 
+      });
+      setMessage({ type: 'success', text: 'Group updated successfully!' });
+      setShowEditGroup(false);
+      setEditingGroup(null);
+      setEditGroupData({ name: '', description: '' });
+      await loadUserGroups(); // Refresh the groups list
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to update group: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <h2>Navigation</h2>
-        <Link to="/home" className="nav-link">Home</Link>
-        <Link to="/settings" className="nav-link active">Settings</Link>
-        
-        <div className="settings-submenu">
-          <div className="submenu-header">Settings</div>
-          <button 
-            className={`submenu-item ${activeSubMenu === 'general' ? 'active' : ''}`}
-            onClick={() => setActiveSubMenu('general')}
-          >
-            ⚙️ General
-          </button>
-          <button 
-            className={`submenu-item ${activeSubMenu === 'users' ? 'active' : ''}`}
-            onClick={() => setActiveSubMenu('users')}
-          >
-            👥 Users
-          </button>
-          <button 
-            className={`submenu-item ${activeSubMenu === 'groups' ? 'active' : ''}`}
-            onClick={() => setActiveSubMenu('groups')}
-          >
-            🏷️ User Groups
-          </button>
-          <button 
-            className={`submenu-item ${activeSubMenu === 'roles' ? 'active' : ''}`}
-            onClick={() => setActiveSubMenu('roles')}
-          >
-            🔐 Roles
-          </button>
-          <button 
-            className={`submenu-item ${activeSubMenu === 'permissions' ? 'active' : ''}`}
-            onClick={() => setActiveSubMenu('permissions')}
-          >
-            🛡️ Permissions
-          </button>
-        </div>
-        
-        <button onClick={handleLogout} className="logout-button">
-          Logout
-        </button>
-      </aside>
-
       {/* Main Content */}
       <main className="content" style={{ flex: 1, padding: '20px' }}>
         {/* Profile Container */}
@@ -817,6 +990,119 @@ const SettingsPage: React.FC = () => {
           {renderContent()}
         </div>
       </main>
+
+      {/* Modal for Create Group */}
+      {showCreateGroup && (
+        <div className="create-form-overlay">
+          <div className="create-form">
+            <div className="form-header">
+              <h3>Create Group</h3>
+              <button onClick={() => setShowCreateGroup(false)} className="close-button">✕</button>
+            </div>
+            <form onSubmit={handleCreateGroup}>
+              <div className="form-group">
+                <label htmlFor="groupName">Group Name *</label>
+                <input id="groupName" type="text" value={newGroup.name} onChange={(e) => setNewGroup({ ...newGroup, name: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label htmlFor="groupDescription">Description</label>
+                <textarea id="groupDescription" value={newGroup.description} onChange={(e) => setNewGroup({ ...newGroup, description: e.target.value })} rows={3} />
+              </div>
+              <div className="form-actions">
+                <button type="submit" className="submit-button" disabled={loading}>{loading ? 'Creating...' : 'Create Group'}</button>
+                <button type="button" className="cancel-button" onClick={() => setShowCreateGroup(false)} disabled={loading}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Edit Group */}
+      {showEditGroup && editingGroup && (
+        <div className="create-form-overlay">
+          <div className="create-form">
+            <div className="form-header">
+              <h3>Edit Group: {editingGroup.name}</h3>
+              <button onClick={() => setShowEditGroup(false)} className="close-button">✕</button>
+            </div>
+            <form onSubmit={handleUpdateGroup}>
+              <div className="form-group">
+                <label htmlFor="editGroupName">Group Name *</label>
+                <input 
+                  id="editGroupName" 
+                  type="text" 
+                  value={editGroupData.name} 
+                  onChange={(e) => setEditGroupData({ ...editGroupData, name: e.target.value })} 
+                  required 
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="editGroupDescription">Description</label>
+                <textarea 
+                  id="editGroupDescription" 
+                  value={editGroupData.description} 
+                  onChange={(e) => setEditGroupData({ ...editGroupData, description: e.target.value })} 
+                  rows={3} 
+                />
+              </div>
+              <div className="form-actions">
+                <button type="submit" className="submit-button" disabled={loading}>{loading ? 'Updating...' : 'Update Group'}</button>
+                <button type="button" className="cancel-button" onClick={() => setShowEditGroup(false)} disabled={loading}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Manage Group Users */}
+      {selectedGroupForUsers && (
+        <div className="create-form-overlay">
+          <div className="create-form">
+            <div className="form-header">
+              <h3>Manage Users: {selectedGroupForUsers.name}</h3>
+              <button onClick={() => setSelectedGroupForUsers(null)} className="close-button">✕</button>
+            </div>
+            <div>
+              <div className="form-group">
+                <label>Current Users</label>
+                <div className="data-table">
+                  <table>
+                    <thead>
+                      <tr><th>Username</th><th>Email</th><th>Status</th><th>Actions</th></tr>
+                    </thead>
+                    <tbody>
+                      {groupUsers.length === 0 ? (
+                        <tr><td colSpan={4}>No users</td></tr>
+                      ) : groupUsers.map((u) => (
+                        <tr key={u.id}>
+                          <td>{u.username}</td>
+                          <td>{u.email}</td>
+                          <td><span className={`status-badge ${u.is_active ? 'active' : 'inactive'}`}>{u.is_active ? 'Active' : 'Inactive'}</span></td>
+                          <td><button className="action-button delete" onClick={() => handleRemoveUserFromSelectedGroup(u.id)}>Remove</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Add User to Group</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select value={selectedUserIdToAdd} onChange={(e) => setSelectedUserIdToAdd(e.target.value ? Number(e.target.value) : '')}>
+                    <option value="">Select user</option>
+                    {users
+                      .filter((u) => !groupUsers.some((gu) => gu.id === u.id))
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>{u.username} ({u.email})</option>
+                      ))}
+                  </select>
+                  <button className="action-button" onClick={handleAddUserToSelectedGroup} disabled={selectedUserIdToAdd === '' || loading}>Add</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

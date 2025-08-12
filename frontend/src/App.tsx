@@ -9,27 +9,24 @@ import RegisterPage from './pages/RegisterPage';
 import AdminProfilePage from './pages/AdminProfilePage';
 import ConfigurationsPage from './pages/ConfigurationsPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import AppLayout from './components/AppLayout';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import TokenExpiryNotification from './components/TokenExpiryNotification';
 import WebSocketStatus from './components/WebSocketStatus';
 import tokenManager from './utils/tokenManager';
+import AssignWorkflowsPage from './pages/AssignWorkflowsPage';
 
 const App: React.FC = () => {
   useEffect(() => {
     console.log('🚀 Initializing application...');
-    
-    // Check if user is already logged in
     const existingToken = tokenManager.getToken();
     if (existingToken) {
       console.log('🔍 Found existing token, initializing WebSocket connection...');
     } else {
       console.log('🔍 No existing token found, user needs to login');
     }
-    
-    // Initialize token checking on app startup
     tokenManager.initializeTokenChecking();
-    
     console.log('✅ Application initialization complete');
   }, []);
 
@@ -47,7 +44,9 @@ const App: React.FC = () => {
           path="/home" 
           element={
             <ProtectedRoute>
-              <HomePage />
+              <AppLayout>
+                <HomePage />
+              </AppLayout>
             </ProtectedRoute>
           } 
         />
@@ -55,15 +54,23 @@ const App: React.FC = () => {
           path="/workflows" 
           element={
             <ProtectedRoute>
-              <WorkflowsPage />
+              <AppLayout>
+                <WorkflowsPage />
+              </AppLayout>
             </ProtectedRoute>
           } 
         />
+        <Route path="/workflows/list" element={<ProtectedRoute><AppLayout><WorkflowsPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/workflows/create" element={<ProtectedRoute><AppLayout><WorkflowsPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/workflows/history" element={<ProtectedRoute><AppLayout><WorkflowsPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/workflows/automate" element={<ProtectedRoute><AppLayout><WorkflowsPage /></AppLayout></ProtectedRoute>} />
         <Route 
           path="/workflows/:workflowId" 
           element={
             <ProtectedRoute>
-              <WorkflowDetailsPage />
+              <AppLayout>
+                <WorkflowDetailsPage />
+              </AppLayout>
             </ProtectedRoute>
           } 
         />
@@ -71,25 +78,48 @@ const App: React.FC = () => {
           path="/configurations" 
           element={
             <ProtectedRoute>
-              <ConfigurationsPage />
+              <AppLayout>
+                <ConfigurationsPage />
+              </AppLayout>
             </ProtectedRoute>
           } 
         />
+        <Route path="/configurations/docker" element={<ProtectedRoute><AppLayout><ConfigurationsPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/configurations/custom" element={<ProtectedRoute><AppLayout><ConfigurationsPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/configurations/vault" element={<ProtectedRoute><AppLayout><ConfigurationsPage /></AppLayout></ProtectedRoute>} />
         <Route 
           path="/settings" 
           element={
             <ProtectedRoute>
-              <SettingsPage />
+              <AppLayout>
+                <SettingsPage />
+              </AppLayout>
             </ProtectedRoute>
           } 
         />
+        <Route path="/settings/general" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/settings/users" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/settings/groups" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />
+        <Route path="/settings/roles" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />
         <Route 
           path="/admin-profile" 
           element={
             <ProtectedRoute>
-              <AdminProfilePage />
+              <AppLayout>
+                <AdminProfilePage />
+              </AppLayout>
             </ProtectedRoute>
           } 
+        />
+        <Route
+          path="/workflows/assign"
+          element={
+            <ProtectedRoute>
+              <AppLayout>
+                <AssignWorkflowsPage />
+              </AppLayout>
+            </ProtectedRoute>
+          }
         />
       </Routes>
     </Router>

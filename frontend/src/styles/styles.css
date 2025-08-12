@@ -299,6 +299,34 @@ tr:hover {
   border-top: 1px solid #eee;
 }
 
+/* Sidebar scrollability */
+.sidebar.scrollable {
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
+/* Dropdown buttons in sidebar */
+.nav-link.dropdown {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #333;
+  border: none;
+  padding: 0.5rem 1rem;
+  margin: 0.25rem 0;
+  cursor: pointer;
+}
+
+.nav-link.dropdown.active {
+  background: #e9ecef;
+}
+
+/* Ensure submenu has small left indent */
+.settings-submenu {
+  padding-left: 0.25rem;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   body {

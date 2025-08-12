@@ -85,7 +85,7 @@ export interface AdminUser {
   is_admin: boolean;
   created_at: string;
   updated_at: string;
-  permission_level: string;
+  role: string;
   groups: string[];
 }
 
@@ -112,13 +112,17 @@ export const getAdminUser = (userId: number): Promise<AxiosResponse<AdminUser>> 
   API.get(`/admin/users/${userId}`);
 
 export interface UpdateUserPermissionsRequest {
-  permission_level: string;
-  is_admin?: boolean;
+  role: 'admin' | 'manager' | 'viewer';
   is_active?: boolean;
 }
 
-export const updateUserPermissions = (userId: number, permissions: UpdateUserPermissionsRequest): Promise<AxiosResponse<AdminUser>> => 
-  API.put(`/admin/users/${userId}/permissions`, permissions);
+// Update user permissions using the new API format
+// Payload: { "role": "admin" | "manager" | "viewer", "is_active": boolean }
+export const updateUserPermissionsNew = (userId: number, permissions: UpdateUserPermissionsRequest): Promise<AxiosResponse<AdminUser>> => {
+  console.log('🚀 API: updateUserPermissionsNew called with:', { userId, permissions });
+  console.log('🚀 API: Sending payload:', permissions);
+  return API.put(`/admin/users/${userId}/permissions`, permissions);
+};
 
 export interface UpdateUserActiveStatusRequest {
   is_active: boolean;
@@ -137,18 +141,22 @@ export const getAllUsersPermissions = (): Promise<AxiosResponse<{ users: Array<{
   API.get('/settings/permissions');
 
 export const getAllUsersPermissionsNew = (): Promise<AxiosResponse<{ 
-  user_permissions: Array<{ 
-    user_id: number; 
+  success: boolean;
+  permissions: Array<{ 
+    id: string; 
     username: string; 
     email: string; 
     is_active: boolean; 
     is_admin: boolean; 
-    permission_level: string; 
-    permission_created_at: string; 
-    permission_updated_at: string; 
+    created_at: string; 
+    updated_at: string; 
+    role: string; 
+    groups: string[]; 
+    role_permissions: string[]; 
+    description: string; 
   }>; 
   count: number; 
-  permission_summary: { 
+  role_summary: { 
     admin: number; 
     manager: number; 
     viewer: number; 
@@ -410,3 +418,129 @@ export const getStepExecutionStatus = (
   stepId: string
 ): Promise<AxiosResponse<StepExecutionStatusResponse>> =>
   API.get(`/workflow/${workflowId}/steps/${stepId}/execute/status`); 
+
+export interface AdminGroup {
+  id: number;
+  name: string;
+  description: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AdminGroupUser {
+  id: number;
+  username: string;
+  email: string;
+  is_active: boolean;
+  is_admin: boolean;
+}
+
+export const createAdminGroup = (group: { name: string; description?: string }): Promise<AxiosResponse<AdminGroup>> =>
+  API.post('/admin/groups', group);
+
+export const getAdminGroups = (): Promise<AxiosResponse<{ groups: AdminGroup[] } | AdminGroup[]>> =>
+  API.get('/admin/groups');
+
+export const getUserGroups = (userId: number): Promise<AxiosResponse<{ groups: AdminGroup[] } | AdminGroup[]>> =>
+  API.get(`/admin/users/${userId}/groups`);
+
+export const addUserToGroup = (userId: number, groupId: number): Promise<AxiosResponse> =>
+  API.post(`/admin/users/${userId}/groups/${groupId}`);
+
+export const removeUserFromGroup = (userId: number, groupId: number): Promise<AxiosResponse> =>
+  API.delete(`/admin/users/${userId}/groups/${groupId}`);
+
+export const getGroupUsers = (groupId: number): Promise<AxiosResponse<{ users: AdminGroupUser[] } | AdminGroupUser[]>> =>
+  API.get(`/admin/groups/${groupId}/users`);
+
+export const deleteAdminGroup = (groupId: number): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+  API.delete(`/admin/groups/${groupId}`);
+
+export const updateAdminGroup = (groupId: number, groupData: { name: string; description?: string }): Promise<AxiosResponse<AdminGroup>> =>
+  API.put(`/admin/groups/${groupId}`, groupData);
+
+// Workflow Sharing APIs
+export const shareWorkflowWithGroup = (workflowId: string, groupId: number): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+  API.post(`/workflow/${workflowId}/share/groups/${groupId}`);
+
+export const unshareWorkflowWithGroup = (workflowId: string, groupId: number): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+  API.delete(`/workflow/${workflowId}/share/groups/${groupId}`);
+
+// Get workflow permissions and sharing data
+export const getWorkflowPermissions = (workflowId: string): Promise<AxiosResponse<{
+  workflow_id: string;
+  workflow_name: string;
+  workflow_description?: string;
+  shared_groups: WorkflowGroupShare[];
+  user_permissions: WorkflowPermission[];
+}>> => API.get(`/workflow/${workflowId}/permissions`);
+
+// Get all workflows with their permissions (for bulk loading)
+export const getAllWorkflowsWithPermissions = (): Promise<AxiosResponse<{
+  workflows: Array<{
+    workflow: Workflow;
+    permissions: {
+      shared_groups: WorkflowGroupShare[];
+      user_permissions: WorkflowPermission[];
+    };
+  }>;
+}>> => API.get('/workflow/permissions/all');
+
+// Dummy data interfaces for workflow permissions
+export interface WorkflowPermission {
+  user_id: number;
+  username: string;
+  email: string;
+  permission: 'read' | 'write' | 'admin';
+  granted_at: string;
+}
+
+export interface WorkflowGroupShare {
+  group_id: number;
+  group_name: string;
+  group_description?: string;
+  is_shared: boolean;
+  shared_at?: string;
+  member_count: number;
+}
+
+export interface WorkflowAssignmentData {
+  workflow_id: string;
+  workflow_name: string;
+  workflow_description?: string;
+  shared_groups: WorkflowGroupShare[];
+  user_permissions: WorkflowPermission[];
+} 
+
+// Workflow Management APIs
+export interface Workflow {
+  id: string;
+  name: string;
+  description?: string;
+  user_id: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  steps: any[];
+}
+
+export interface WorkflowListResponse {
+  success: boolean;
+  workflows: Workflow[];
+  count: number;
+}
+
+export const getWorkflows = (): Promise<AxiosResponse<WorkflowListResponse>> =>
+  API.get('/workflow/list');
+
+export const getWorkflow = (workflowId: string): Promise<AxiosResponse<Workflow>> =>
+  API.get(`/workflow/${workflowId}`);
+
+export const createWorkflow = (workflowData: { name: string; description?: string }): Promise<AxiosResponse<{ success: boolean; workflow_id: string; message: string }>> =>
+  API.post('/workflow/create', workflowData);
+
+export const updateWorkflow = (workflowId: string, workflowData: { name?: string; description?: string }): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+  API.put(`/workflow/${workflowId}`, workflowData);
+
+export const deleteWorkflow = (workflowId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+  API.delete(`/workflow/${workflowId}`); 
