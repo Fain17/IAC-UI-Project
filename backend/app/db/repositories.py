@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict
-from app.db.database import db_service
+from app.db.database import db_service, generate_user_id, generate_group_id
 from app.db.models import ConfigMapping, User, UserCreate, ConfigMappingCreate
 import logging
 from datetime import datetime, timezone
@@ -213,7 +213,7 @@ class UserRepository:
     """Repository for user operations."""
     
     @staticmethod
-    async def get_by_id(user_id: int) -> Optional[Dict]:
+    async def get_by_id(user_id: str) -> Optional[Dict]:
         """Get user by ID."""
         if not db_service.client:
             return None
@@ -347,29 +347,41 @@ class UserRepository:
             return None
     
     @staticmethod
-    async def create(username: str, email: str, hashed_password: str, is_admin: bool = False) -> bool:
-        """Create a new user."""
+    async def create(username: str, email: str, hashed_password: str, is_admin: bool = False) -> Optional[str]:
+        """Create a new user and return the user ID."""
         if not db_service.client:
-            return False
+            return None
         try:
-            # Check if user already exists
+            # Check if username already exists
             result = await db_service.client.execute(
-                "SELECT id FROM users WHERE username = ? OR email = ?",
-                [username, email]
+                "SELECT id FROM users WHERE username = ?",
+                [username]
             )
             
             if result.rows:
-                return False
+                return None
+            
+            # Check if email already exists
+            result = await db_service.client.execute(
+                "SELECT id FROM users WHERE email = ?",
+                [email]
+            )
+            
+            if result.rows:
+                return None
+            
+            # Generate UUID for user
+            user_id = generate_user_id()
             
             # Create new user
             await db_service.client.execute(
-                "INSERT INTO users (username, email, hashed_password, is_admin) VALUES (?, ?, ?, ?)",
-                [username, email, hashed_password, is_admin]
+                "INSERT INTO users (id, username, email, hashed_password, is_admin) VALUES (?, ?, ?, ?, ?)",
+                [user_id, username, email, hashed_password, is_admin]
             )
-            return True
+            return user_id
         except Exception as e:
             logger.error(f"Error creating user: {e}")
-            return False
+            return None
     
     @staticmethod
     async def get_all() -> List[Dict]:
@@ -398,7 +410,7 @@ class UserRepository:
             return []
     
     @staticmethod
-    async def delete(user_id: int) -> bool:
+    async def delete(user_id: str) -> bool:
         """Delete a user."""
         if not db_service.client:
             return False
@@ -413,7 +425,7 @@ class UserRepository:
             return False
     
     @staticmethod
-    async def update_is_active(user_id: int, is_active: bool) -> bool:
+    async def update_is_active(user_id: str, is_active: bool) -> bool:
         """Update user's active status."""
         if not db_service.client:
             return False
@@ -427,10 +439,25 @@ class UserRepository:
             logger.error(f"Error updating user active status: {e}")
             return False
 
+    @staticmethod
+    async def update_is_admin(user_id: str, is_admin: bool) -> bool:
+        """Update user's admin status."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "UPDATE users SET is_admin = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [is_admin, user_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating user admin status: {e}")
+            return False
+
 class UserSessionRepository:
     """Repository for user session operations."""
     @staticmethod
-    async def create(user_id: int, session_token: str, expires_at):
+    async def create(user_id: str, session_token: str, expires_at):
         if not db_service.client:
             return False
         try:
@@ -475,7 +502,7 @@ class RefreshTokenRepository:
     """Repository for refresh token operations."""
     
     @staticmethod
-    async def create(user_id: int, refresh_token: str, expires_at) -> bool:
+    async def create(user_id: str, refresh_token: str, expires_at) -> bool:
         """Create a new refresh token."""
         if not db_service.client:
             return False
@@ -545,7 +572,7 @@ class RefreshTokenRepository:
             return False
 
     @staticmethod
-    async def revoke_all_for_user(user_id: int) -> bool:
+    async def revoke_all_for_user(user_id: str) -> bool:
         """Revoke all refresh tokens for a specific user."""
         if not db_service.client:
             return False
@@ -578,22 +605,35 @@ class UserGroupRepository:
     """Repository for user group operations."""
     
     @staticmethod
-    async def create(name: str, description: str = None) -> Optional[int]:
-        """Create a new user group and return its ID."""
+    async def create(name: str, description: str = None) -> Optional[str]:
+        """Create a new user group and return the group ID."""
         if not db_service.client:
             return None
         try:
+            # Check if group already exists
             result = await db_service.client.execute(
-                "INSERT INTO user_groups (name, description) VALUES (?, ?) RETURNING id",
-                [name, description]
+                "SELECT id FROM user_groups WHERE name = ?",
+                [name]
             )
-            return result.rows[0][0] if result.rows else None
+            
+            if result.rows:
+                return None
+            
+            # Generate UUID for group
+            group_id = generate_group_id()
+            
+            # Create new group
+            await db_service.client.execute(
+                "INSERT INTO user_groups (id, name, description) VALUES (?, ?, ?)",
+                [group_id, name, description]
+            )
+            return group_id
         except Exception as e:
             logger.error(f"Error creating user group: {e}")
             return None
     
     @staticmethod
-    async def get_by_id(group_id: int) -> Optional[Dict]:
+    async def get_by_id(group_id: str) -> Optional[Dict]:
         """Get user group by ID."""
         if not db_service.client:
             return None
@@ -643,7 +683,7 @@ class UserGroupRepository:
             return []
     
     @staticmethod
-    async def update(group_id: int, name: str = None, description: str = None) -> bool:
+    async def update(group_id: str, name: str = None, description: str = None) -> bool:
         """Update a user group."""
         if not db_service.client:
             return False
@@ -673,7 +713,7 @@ class UserGroupRepository:
             return False
     
     @staticmethod
-    async def delete(group_id: int) -> bool:
+    async def delete(group_id: str) -> bool:
         """Delete a user group."""
         if not db_service.client:
             return False
@@ -691,32 +731,28 @@ class UserPermissionRepository:
     """Repository for user permission operations."""
     
     @staticmethod
-    async def create(user_id: int, permission_level: str) -> Optional[int]:
-        """Create a new user permission and return its ID."""
+    async def create(user_id: str, role: str) -> Optional[int]:
+        """Create a new user permission record."""
         if not db_service.client:
-            logger.error("Database client not initialized")
             return None
         try:
-            logger.info(f"Creating permission for user {user_id} with level {permission_level}")
             result = await db_service.client.execute(
-                "INSERT INTO user_permissions (user_id, permission_level) VALUES (?, ?) RETURNING id",
-                [user_id, permission_level]
+                "INSERT INTO user_permissions (user_id, role) VALUES (?, ?)",
+                [user_id, role]
             )
-            permission_id = result.rows[0][0] if result.rows else None
-            logger.info(f"Created permission with ID: {permission_id}")
-            return permission_id
+            return int(result.last_insert_rowid) if result.last_insert_rowid else None
         except Exception as e:
             logger.error(f"Error creating user permission: {e}")
             return None
     
     @staticmethod
-    async def get_by_user_id(user_id: int) -> Optional[Dict]:
+    async def get_by_user_id(user_id: str) -> Optional[Dict]:
         """Get user permission by user ID."""
         if not db_service.client:
             return None
         try:
             result = await db_service.client.execute(
-                "SELECT id, user_id, permission_level, created_at, updated_at FROM user_permissions WHERE user_id = ?",
+                "SELECT id, user_id, role, created_at, updated_at FROM user_permissions WHERE user_id = ?",
                 [user_id]
             )
             
@@ -727,7 +763,7 @@ class UserPermissionRepository:
             return {
                 "id": permission[0],
                 "user_id": permission[1],
-                "permission_level": permission[2],
+                "role": permission[2],
                 "created_at": permission[3],
                 "updated_at": permission[4]
             }
@@ -736,25 +772,22 @@ class UserPermissionRepository:
             return None
     
     @staticmethod
-    async def update(user_id: int, permission_level: str) -> bool:
+    async def update(user_id: str, role: str) -> bool:
         """Update user permission."""
         if not db_service.client:
-            logger.error("Database client not initialized")
             return False
         try:
-            logger.info(f"Updating permission for user {user_id} to {permission_level}")
             result = await db_service.client.execute(
-                "UPDATE user_permissions SET permission_level = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-                [permission_level, user_id]
+                "UPDATE user_permissions SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                [role, user_id]
             )
-            logger.info(f"Update result: rows_affected={result.rows_affected}")
             return result.rows_affected > 0
         except Exception as e:
             logger.error(f"Error updating user permission: {e}")
             return False
     
     @staticmethod
-    async def delete(user_id: int) -> bool:
+    async def delete(user_id: str) -> bool:
         """Delete user permission."""
         if not db_service.client:
             return False
@@ -775,7 +808,7 @@ class UserPermissionRepository:
             return []
         try:
             result = await db_service.client.execute("""
-                SELECT up.user_id, up.permission_level, up.created_at, up.updated_at,
+                SELECT up.user_id, up.role, up.created_at, up.updated_at,
                        u.username, u.email, u.is_active, u.is_admin
                 FROM user_permissions up
                 JOIN users u ON up.user_id = u.id
@@ -786,7 +819,7 @@ class UserPermissionRepository:
             for row in result.rows:
                 permissions.append({
                     "user_id": row[0],
-                    "permission_level": row[1],
+                    "role": row[1],
                     "created_at": row[2],
                     "updated_at": row[3],
                     "username": row[4],
@@ -803,7 +836,7 @@ class UserGroupAssignmentRepository:
     """Repository for user group assignment operations."""
     
     @staticmethod
-    async def create(user_id: int, group_id: int) -> Optional[int]:
+    async def create(user_id: str, group_id: str) -> Optional[int]:
         """Assign a user to a group and return the assignment ID."""
         if not db_service.client:
             return None
@@ -818,7 +851,7 @@ class UserGroupAssignmentRepository:
             return None
     
     @staticmethod
-    async def get_user_groups(user_id: int) -> List[Dict]:
+    async def get_user_groups(user_id: str) -> List[Dict]:
         """Get all groups for a user."""
         if not db_service.client:
             return []
@@ -844,7 +877,7 @@ class UserGroupAssignmentRepository:
             return []
     
     @staticmethod
-    async def get_group_users(group_id: int) -> List[Dict]:
+    async def get_group_users(group_id: str) -> List[Dict]:
         """Get all users in a group."""
         if not db_service.client:
             return []
@@ -871,7 +904,7 @@ class UserGroupAssignmentRepository:
             return []
     
     @staticmethod
-    async def remove_user_from_group(user_id: int, group_id: int) -> bool:
+    async def remove_user_from_group(user_id: str, group_id: str) -> bool:
         """Remove a user from a group."""
         if not db_service.client:
             return False
@@ -889,7 +922,7 @@ class WorkflowRepository:
     """Repository for workflow operations."""
     
     @staticmethod
-    async def create(workflow_id: str, user_id: int, name: str, description: str = None, steps: List[Dict] = None) -> bool:
+    async def create(workflow_id: str, user_id: str, name: str, description: str = None, steps: List[Dict] = None) -> bool:
         """Create a new workflow and return success status."""
         if not db_service.client:
             return False
@@ -908,7 +941,7 @@ class WorkflowRepository:
             return False
     
     @staticmethod
-    async def get_by_id(workflow_id: str, user_id: int) -> Optional[Dict]:
+    async def get_by_id(workflow_id: str, user_id: str) -> Optional[Dict]:
         """Get workflow by ID for a specific user."""
         if not db_service.client:
             return None
@@ -937,7 +970,7 @@ class WorkflowRepository:
             return None
     
     @staticmethod
-    async def get_all_by_user(user_id: int) -> List[Dict]:
+    async def get_all_by_user(user_id: str) -> List[Dict]:
         """Get all workflows for a specific user."""
         if not db_service.client:
             return []
@@ -965,7 +998,50 @@ class WorkflowRepository:
             return []
     
     @staticmethod
-    async def delete(workflow_id: str, user_id: int) -> bool:
+    async def get_all_by_user_groups(user_id: str, group_id: str = None) -> List[Dict]:
+        """Get all workflows accessible to a user through team/group membership."""
+        if not db_service.client:
+            return []
+        try:
+            # If group_id is provided, get workflows from that specific group
+            if group_id:
+                result = await db_service.client.execute("""
+                    SELECT DISTINCT w.id, w.user_id, w.name, w.description, w.steps, w.is_active, w.created_at, w.updated_at
+                    FROM workflows w
+                    JOIN user_group_assignments uga ON w.user_id = uga.user_id
+                    WHERE uga.group_id = ? AND w.is_active = TRUE
+                    ORDER BY w.created_at DESC
+                """, [group_id])
+            else:
+                # Get workflows from all groups the user is a member of
+                result = await db_service.client.execute("""
+                    SELECT DISTINCT w.id, w.user_id, w.name, w.description, w.steps, w.is_active, w.created_at, w.updated_at
+                    FROM workflows w
+                    JOIN user_group_assignments uga ON w.user_id = uga.user_id
+                    JOIN user_group_assignments user_uga ON user_uga.group_id = uga.group_id
+                    WHERE user_uga.user_id = ? AND w.is_active = TRUE
+                    ORDER BY w.created_at DESC
+                """, [user_id])
+            
+            workflows = []
+            for row in result.rows:
+                workflows.append({
+                    "id": row[0],
+                    "user_id": row[1],
+                    "name": row[2],
+                    "description": row[3],
+                    "steps": json.loads(row[4]),
+                    "is_active": bool(row[5]),
+                    "created_at": row[6],
+                    "updated_at": row[7]
+                })
+            return workflows
+        except Exception as e:
+            logger.error(f"Error getting workflows by user groups: {e}")
+            return []
+    
+    @staticmethod
+    async def delete(workflow_id: str, user_id: str) -> bool:
         """Delete a workflow by ID for a specific user."""
         if not db_service.client:
             return False
@@ -980,7 +1056,7 @@ class WorkflowRepository:
             return False
     
     @staticmethod
-    async def update(workflow_id: str, user_id: int, name: str = None, description: str = None, steps: List[Dict] = None, is_active: bool = None) -> bool:
+    async def update(workflow_id: str, user_id: str, name: str = None, description: str = None, steps: List[Dict] = None, is_active: bool = None) -> bool:
         """Update a workflow by ID for a specific user."""
         if not db_service.client:
             return False

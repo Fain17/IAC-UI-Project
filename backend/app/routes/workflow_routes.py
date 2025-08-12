@@ -63,14 +63,38 @@ async def create_workflow_route(
 async def list_workflows(current_user: dict = Depends(get_current_user)):
     """
     Get all workflows for the authenticated user.
-    Returns a list of workflows with their details.
+    Returns workflows owned by the user and workflows shared with teams the user is a member of.
     """
     try:
-        workflows = await get_user_workflows(current_user["id"])
+        # Get user's own workflows
+        own_workflows = await get_user_workflows(current_user["id"])
+        
+        # Get workflows from teams the user is a member of
+        from app.db.repositories import WorkflowRepository
+        team_workflows = await WorkflowRepository.get_all_by_user_groups(current_user["id"])
+        
+        # Combine and deduplicate workflows
+        all_workflows = own_workflows + team_workflows
+        unique_workflows = {}
+        
+        for workflow in all_workflows:
+            workflow_id = workflow["id"]
+            if workflow_id not in unique_workflows:
+                unique_workflows[workflow_id] = workflow
+            else:
+                # If workflow appears in both lists, keep the one with more recent updated_at
+                existing = unique_workflows[workflow_id]
+                if workflow.get("updated_at", "") > existing.get("updated_at", ""):
+                    unique_workflows[workflow_id] = workflow
+        
+        workflows_list = list(unique_workflows.values())
+        
         return JSONResponse({
             "success": True,
-            "workflows": workflows,
-            "count": len(workflows)
+            "workflows": workflows_list,
+            "count": len(workflows_list),
+            "own_count": len(own_workflows),
+            "team_count": len(team_workflows)
         })
     except Exception as e:
         logger.error(f"Error listing workflows: {e}")
@@ -83,10 +107,17 @@ async def get_workflow_route(
 ):
     """
     Get a specific workflow by ID.
-    Only returns workflows owned by the authenticated user.
+    Returns workflows owned by the authenticated user or workflows shared with teams the user is a member of.
     """
     try:
+        # First try to get workflow as owner
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        
+        # If not found as owner, check if accessible through team membership
+        if not workflow:
+            from app.db.repositories import WorkflowRepository
+            team_workflows = await WorkflowRepository.get_all_by_user_groups(current_user["id"])
+            workflow = next((w for w in team_workflows if w["id"] == workflow_id), None)
         
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found or access denied")
@@ -111,6 +142,11 @@ async def delete_workflow_route(
     Only allows deletion of workflows owned by the authenticated user.
     """
     try:
+        # Only owners can delete workflows (not team members)
+        workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found or access denied")
+        
         result = await delete_workflow(workflow_id, current_user["id"])
         
         if result["success"]:
@@ -134,6 +170,11 @@ async def update_workflow_route(
     Only allows updates to workflows owned by the authenticated user.
     """
     try:
+        # Only owners can update workflows (not team members)
+        workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found or access denied")
+        
         # Convert Pydantic model to dict for service
         update_data = {}
         if workflow_data.name is not None:
@@ -193,8 +234,9 @@ async def append_step_route(
     A step directory will be created under the workflow directory for this step.
     """
     try:
-        # Get the current workflow
-        workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        # Check if user has access to the workflow (owner or team member)
+        from app.services.workflow_service import check_workflow_access
+        workflow = await check_workflow_access(workflow_id, current_user["id"])
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found or access denied")
         
@@ -270,7 +312,7 @@ async def append_step_route(
             }, status_code=201)
         else:
             raise HTTPException(status_code=400, detail=result["error"])
-            
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -875,4 +917,64 @@ async def execute_workflow_route(
         raise
     except Exception as e:
         logger.error(f"Error executing workflow: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") 
+
+@router.post("/{workflow_id}/share/groups/{group_id}", tags=["Workflow"])
+async def share_workflow_with_group(
+    workflow_id: str,
+    group_id: str,
+    permission: str = Query("read"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Share a workflow with a group (owner only). Permissions: read|write|execute (reserved for future use).
+    """
+    try:
+        # Ensure workflow exists and belongs to current user
+        workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found or access denied")
+        from app.db.repositories import WorkflowShareRepository
+        mapping_id = await WorkflowShareRepository.share(workflow_id, group_id, permission)
+        if mapping_id is None:
+            raise HTTPException(status_code=400, detail="Failed to share workflow with group")
+        return JSONResponse({
+            "success": True,
+            "workflow_id": workflow_id,
+            "group_id": group_id,
+            "permission": permission
+        }, status_code=201)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sharing workflow {workflow_id} with group {group_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.delete("/{workflow_id}/share/groups/{group_id}", tags=["Workflow"])
+async def unshare_workflow_with_group(
+    workflow_id: str,
+    group_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Remove a workflow's share with a group (owner only).
+    """
+    try:
+        # Ensure workflow exists and belongs to current user
+        workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found or access denied")
+        from app.db.repositories import WorkflowShareRepository
+        ok = await WorkflowShareRepository.unshare(workflow_id, group_id)
+        if not ok:
+            raise HTTPException(status_code=400, detail="Failed to unshare workflow with group")
+        return JSONResponse({
+            "success": True,
+            "workflow_id": workflow_id,
+            "group_id": group_id
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unsharing workflow {workflow_id} from group {group_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 

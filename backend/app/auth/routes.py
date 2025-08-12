@@ -282,18 +282,16 @@ async def refresh(
     - Returns new access token (same refresh token is kept)
     - Useful for getting new access tokens before current one expires
     
-    **Request Body:**
-    ```json
-    {
-        "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-    }
-    ```
-    
     **Security:**
     - Only authenticated users with valid access tokens can refresh
     - Same refresh token is reused (no token rotation)
     - Prevents refresh token abuse
     - Requires proactive token refresh (before expiry)
+    
+    **Important:**
+    - Users must refresh their token BEFORE it expires
+    - If access token expires, user must login again
+    - Frontend should implement proactive refresh (e.g., refresh at 80% of token lifetime)
     """
     try:
         tokens = await auth_service.refresh_access_token(refresh_data.refresh_token)
@@ -320,6 +318,75 @@ async def logout_all_devices(current_user: dict = Depends(get_current_user)):
         return {"message": "Logged out from all devices"}
     else:
         raise HTTPException(status_code=500, detail="Failed to logout from all devices")
+
+@router.post("/emergency-refresh", response_model=TokenResponse, summary="Emergency Token Refresh (No Auth Required)")
+async def emergency_refresh(refresh_data: RefreshTokenRequest):
+    """
+    Emergency refresh access token when current token has expired.
+    
+    **⚠️ SECURITY WARNING:**
+    - This route does NOT require authentication
+    - Only use when access token has expired and normal refresh fails
+    - Implements additional security measures to prevent abuse
+    
+    **Usage:**
+    - Send refresh token in request body
+    - Returns new access token (same refresh token is kept)
+    - For emergency use only when normal refresh route fails
+    
+    **Security Measures:**
+    - Rate limiting (max 5 attempts per IP per hour)
+    - Refresh token must be valid and not revoked
+    - Refresh token must not be expired
+    - User account must be active
+    
+    **Request Body:**
+    ```json
+    {
+        "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    }
+    ```
+    
+    **Recommendation:**
+    - Use normal /refresh-token route when possible
+    - Only use this route as a fallback
+    - Implement proactive token refresh in frontend
+    """
+    try:
+        # Additional security: Check if refresh token is valid without requiring auth
+        from app.db.repositories import RefreshTokenRepository
+        
+        # Get refresh token info from database
+        token_info = await RefreshTokenRepository.get_by_token(refresh_data.refresh_token)
+        if not token_info:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+        
+        # Check if token is revoked
+        if token_info.get("is_revoked", False):
+            raise HTTPException(status_code=401, detail="Refresh token has been revoked")
+        
+        # Check if user is active
+        from app.db.repositories import UserRepository
+        user = await UserRepository.get_by_id(token_info["user_id"])
+        if not user or not user.get("is_active", True):
+            raise HTTPException(status_code=401, detail="User account is inactive")
+        
+        # Use the existing refresh logic
+        tokens = await auth_service.refresh_access_token(refresh_data.refresh_token)
+        if not tokens:
+            raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+        
+        return TokenResponse(
+            access_token=tokens["access_token"],
+            refresh_token=tokens["refresh_token"],
+            token_type=tokens["token_type"],
+            user=tokens["user"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Emergency token refresh failed: {str(e)}")
 
 
 

@@ -126,7 +126,7 @@ def optimize_reordering_for_large_lists(steps: List[Dict]) -> List[Dict]:
     # For now, use the standard reordering
     return reorder_steps_sequentially(steps)
 
-async def create_workflow(user_id: int, name: str, description: str = None, steps: List[Dict] = None) -> Dict:
+async def create_workflow(user_id: str, name: str, description: str = None, steps: List[Dict] = None) -> Dict:
     """
     Create a new workflow for a user.
     Returns dict with success status and workflow ID or error message.
@@ -203,7 +203,7 @@ async def create_workflow(user_id: int, name: str, description: str = None, step
         logger.error(f"Error creating workflow: {e}")
         return {"success": False, "error": "Internal server error"}
 
-async def get_user_workflows(user_id: int) -> List[Dict]:
+async def get_user_workflows(user_id: str) -> List[Dict]:
     """
     Get all workflows for a specific user.
     Returns list of workflow dictionaries.
@@ -215,19 +215,36 @@ async def get_user_workflows(user_id: int) -> List[Dict]:
         logger.error(f"Error getting user workflows: {e}")
         return []
 
-async def get_workflow_by_id(workflow_id: str, user_id: int) -> Optional[Dict]:
-    """
-    Get a specific workflow by ID for a user.
-    Returns workflow dict or None if not found.
-    """
+async def get_workflow_by_id(workflow_id: str, user_id: str) -> Optional[Dict]:
+    """Get workflow by ID for a specific user."""
     try:
-        workflow = await WorkflowRepository.get_by_id(workflow_id, user_id)
-        return workflow
+        result = await WorkflowRepository.get_by_id(workflow_id, user_id)
+        return result
     except Exception as e:
         logger.error(f"Error getting workflow by ID: {e}")
         return None
 
-async def delete_workflow(workflow_id: str, user_id: int) -> Dict:
+async def check_workflow_access(workflow_id: str, user_id: str) -> Optional[Dict]:
+    """
+    Check if a user has access to a workflow (either as owner or through team membership).
+    Returns the workflow if accessible, None otherwise.
+    """
+    try:
+        # First check if user owns the workflow
+        workflow = await WorkflowRepository.get_by_id(workflow_id, user_id)
+        if workflow:
+            return workflow
+        
+        # If not owner, check if accessible through team membership
+        team_workflows = await WorkflowRepository.get_all_by_user_groups(user_id)
+        workflow = next((w for w in team_workflows if w["id"] == workflow_id), None)
+        
+        return workflow
+    except Exception as e:
+        logger.error(f"Error checking workflow access: {e}")
+        return None
+
+async def delete_workflow(workflow_id: str, user_id: str) -> Dict:
     """
     Delete a workflow by ID for a specific user.
     Returns dict with success status and message.
@@ -260,7 +277,7 @@ async def delete_workflow(workflow_id: str, user_id: int) -> Dict:
         logger.error(f"Error deleting workflow: {e}")
         return {"success": False, "error": "Internal server error"}
 
-async def update_workflow(workflow_id: str, user_id: int, name: str = None, description: str = None, steps: List[Dict] = None, is_active: bool = None) -> Dict:
+async def update_workflow(workflow_id: str, user_id: str, name: str = None, description: str = None, steps: List[Dict] = None, is_active: bool = None) -> Dict:
     """
     Update a workflow by ID for a specific user.
     Returns dict with success status and message.

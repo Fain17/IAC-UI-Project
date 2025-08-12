@@ -13,15 +13,15 @@ async def user_profile(current_user: dict = Depends(get_current_user)):
 async def user_permissions(current_user: dict = Depends(get_current_user)):
     """
     Get current user's permissions.
-    Returns the user's permission level and related information.
+    Returns the user's role and related information.
     """
     permissions = await get_user_permissions(current_user["id"])
     
     if not permissions:
-        # Return default viewer permission if no permission record exists
+        # Return default viewer role if no permission record exists
         return JSONResponse({
             "user_id": current_user["id"],
-            "permission_level": "viewer",
+            "role": "viewer",
             "created_at": None,
             "updated_at": None
         })

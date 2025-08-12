@@ -8,6 +8,25 @@ class ScriptType(str, Enum):
     PYTHON = "python"
     NODEJS = "nodejs"
 
+# Role and Permission Enums
+class UserRole(str, Enum):
+    ADMIN = "admin"
+    MANAGER = "manager"
+    VIEWER = "viewer"
+
+class Permission(str, Enum):
+    READ = "read"
+    WRITE = "write"
+    EXECUTE = "execute"
+    DELETE = "delete"
+
+# Role-Permission Mapping
+ROLE_PERMISSIONS = {
+    UserRole.ADMIN: [Permission.READ, Permission.WRITE, Permission.EXECUTE, Permission.DELETE],
+    UserRole.MANAGER: [Permission.READ, Permission.WRITE, Permission.EXECUTE],
+    UserRole.VIEWER: [Permission.READ, Permission.EXECUTE]
+}
+
 # Config Mapping Models
 class ConfigMappingBase(BaseModel):
     instance_name: str
@@ -41,7 +60,7 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
 
 class User(UserBase):
-    id: int
+    id: str
     is_active: bool
     is_admin: bool
     created_at: datetime
@@ -61,11 +80,11 @@ class Token(BaseModel):
     user: User
 
 class TokenData(BaseModel):
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
 
 # Session Models
 class UserSessionBase(BaseModel):
-    user_id: int
+    user_id: str
     session_token: str
     expires_at: datetime
 
@@ -78,7 +97,7 @@ class UserSession(UserSessionBase):
 
 # Refresh Token Models
 class RefreshTokenBase(BaseModel):
-    user_id: int
+    user_id: str
     refresh_token: str
     expires_at: datetime
 
@@ -112,7 +131,7 @@ class UserGroupUpdate(BaseModel):
     description: Optional[str] = None
 
 class UserGroup(UserGroupBase):
-    id: int
+    id: str
     created_at: datetime
     updated_at: datetime
 
@@ -120,14 +139,14 @@ class UserGroup(UserGroupBase):
         from_attributes = True
 
 class UserPermissionBase(BaseModel):
-    user_id: int
-    permission_level: str  # admin, manager, viewer
+    user_id: str
+    role: UserRole  # admin, manager, viewer
 
 class UserPermissionCreate(UserPermissionBase):
     pass
 
 class UserPermissionUpdate(BaseModel):
-    permission_level: str
+    role: UserRole
 
 class UserPermission(UserPermissionBase):
     id: int
@@ -137,9 +156,32 @@ class UserPermission(UserPermissionBase):
     class Config:
         from_attributes = True
 
+# New model for granular user permissions
+class UserPermissionsBase(BaseModel):
+    user_id: str
+    permission: Permission
+    resource_type: str  # workflow, user, group, etc.
+    resource_id: Optional[str] = None  # specific resource ID, null for global permissions
+
+class UserPermissionsCreate(UserPermissionsBase):
+    pass
+
+class UserPermissionsUpdate(BaseModel):
+    permission: Permission
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+
+class UserPermissions(UserPermissionsBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class UserGroupAssignmentBase(BaseModel):
-    user_id: int
-    group_id: int
+    user_id: str
+    group_id: str
 
 class UserGroupAssignmentCreate(UserGroupAssignmentBase):
     pass
@@ -155,11 +197,11 @@ class AdminUserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
-    permission_level: str = "viewer"  # admin, manager, viewer
-    group_id: Optional[int] = None
+    role: UserRole = UserRole.VIEWER  # admin, manager, viewer
+    group_id: Optional[str] = None
 
 class AdminUserPermissionUpdate(BaseModel):
-    permission_level: Optional[str] = None
+    role: Optional[UserRole] = None
     is_active: Optional[bool] = None
 
 # Workflow Models
@@ -197,7 +239,7 @@ class WorkflowUpdate(BaseModel):
 
 class Workflow(WorkflowBase):
     id: str  # UUID for workflow
-    user_id: int
+    user_id: str
     is_active: bool = True
     created_at: datetime
     updated_at: datetime

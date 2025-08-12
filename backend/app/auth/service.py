@@ -43,7 +43,7 @@ class AuthService:
             try:
                 # Convert to ISO format for consistent storage
                 expire_iso = expire.isoformat()
-                success = await UserSessionRepository.create(int(user_id), encoded_jwt, expire_iso)
+                success = await UserSessionRepository.create(user_id, encoded_jwt, expire_iso)
                 if success:
                     logger.info(f"Session created successfully for user {user_id}, expires at {expire_iso}")
                 else:
@@ -76,7 +76,7 @@ class AuthService:
             from app.db.repositories import RefreshTokenRepository
             try:
                 expire_iso = expire.isoformat()
-                success = await RefreshTokenRepository.create(int(user_id), encoded_jwt, expire_iso)
+                success = await RefreshTokenRepository.create(user_id, encoded_jwt, expire_iso)
                 if success:
                     logger.info(f"Refresh token created successfully for user {user_id}, expires at {expire_iso}")
                 else:
@@ -158,7 +158,7 @@ class AuthService:
             return None
         
         # Get user info
-        user = await self.get_user_by_id(int(user_id))
+        user = await self.get_user_by_id(user_id)
         if not user:
             return None
         
@@ -323,11 +323,11 @@ class AuthService:
             logger.error(f"Error authenticating user by email: {e}")
             return None
     
-    async def get_user_by_id(self, user_id: int) -> Optional[dict]:
+    async def get_user_by_id(self, user_id: str) -> Optional[dict]:
         """Get user by ID."""
         return await UserRepository.get_by_id(user_id)
 
-    async def change_password(self, user_id: int, current_password: str, new_password: str, confirm_password: str) -> dict:
+    async def change_password(self, user_id: str, current_password: str, new_password: str, confirm_password: str) -> dict:
         user = await UserRepository.get_by_id(user_id)
         if not user:
             return {"success": False, "error": "User not found"}
@@ -348,7 +348,7 @@ class AuthService:
         )
         return {"success": True, "message": "Password updated successfully"}
 
-    async def delete_user_account(self, user_id: int, password: str, require_password: bool = True) -> dict:
+    async def delete_user_account(self, user_id: str, password: str, require_password: bool = True) -> dict:
         from app.db.database import db_service
         if not db_service.client:
             raise RuntimeError("Database client not initialized")
@@ -376,7 +376,7 @@ class AuthService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def edit_username(self, user_id: int, new_username: str) -> dict:
+    async def edit_username(self, user_id: str, new_username: str) -> dict:
         from app.db.database import db_service
         if not db_service.client:
             raise RuntimeError("Database client not initialized")
@@ -742,7 +742,7 @@ class AuthService:
             "user": user_data
         }
 
-    async def revoke_all_refresh_tokens(self, user_id: int) -> bool:
+    async def revoke_all_refresh_tokens(self, user_id: str) -> bool:
         """Revoke all refresh tokens for a user (useful for logout all devices)."""
         from app.db.repositories import RefreshTokenRepository
         return await RefreshTokenRepository.revoke_all_for_user(user_id)
