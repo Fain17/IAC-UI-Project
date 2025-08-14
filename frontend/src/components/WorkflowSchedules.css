@@ -1,0 +1,603 @@
+.workflow-schedules-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.workflow-schedules-modal {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  width: 90%;
+  max-width: 1200px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  padding: 24px 28px;
+  border-bottom: 1px solid #e9ecef;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #f8f9fa;
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.modal-close:hover {
+  background-color: #e9ecef;
+  color: #333;
+}
+
+.modal-body {
+  padding: 28px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.message {
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.success-message {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.error-message {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.message-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: inherit;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.schedules-header {
+  margin-bottom: 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.refresh-status-button {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s ease;
+}
+
+.refresh-status-button:hover {
+  background-color: #5a6268;
+}
+
+.refresh-status-button:disabled {
+  background-color: #adb5bd;
+  cursor: not-allowed;
+}
+
+.create-button {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.create-button:hover:not(:disabled) {
+  background-color: #218838;
+}
+
+.create-button:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.loading {
+  text-align: center;
+  padding: 60px;
+  color: #666;
+  font-size: 16px;
+}
+
+.no-schedules {
+  text-align: center;
+  padding: 60px;
+  color: #666;
+}
+
+.no-schedules p {
+  margin: 16px 0;
+}
+
+.schedules-table {
+  overflow-x: auto;
+  margin-top: 20px;
+}
+
+.schedules-table table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 16px;
+}
+
+.schedules-table th,
+.schedules-table td {
+  padding: 20px 16px;
+  text-align: left;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.schedules-table th {
+  background-color: #f8f9fa;
+  font-weight: 600;
+  color: #495057;
+  padding: 24px 16px;
+}
+
+.schedules-table tr:hover {
+  background-color: #f8f9fa;
+}
+
+.clickable-row {
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.clickable-row:hover {
+  background-color: #e3f2fd !important;
+}
+
+.schedule-type-badge {
+  background-color: #007bff;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.schedule-value {
+  background-color: #f8f9fa;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  color: #495057;
+}
+
+.status-badge {
+  padding: 8px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.status-badge.success {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-badge.warning {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.status-badge.info {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.status-badge.error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+/* Scheduler Status Section */
+.scheduler-status-section {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 28px;
+}
+
+.scheduler-status-section h3 {
+  margin: 0 0 20px 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-label {
+  font-weight: 500;
+  color: #555;
+  font-size: 0.875rem;
+}
+
+.status-value {
+  font-weight: 600;
+  color: #333;
+}
+
+.status-value.running {
+  color: #28a745;
+}
+
+.status-value.stopped {
+  color: #dc3545;
+}
+
+/* Execution Status Styles */
+.execution-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.execution-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.execution-result {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.execution-result.success {
+  color: #28a745;
+}
+
+.execution-result.error {
+  color: #dc3545;
+}
+
+.execution-time {
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.last-execution {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.next-run {
+  font-size: 0.75rem;
+  color: #17a2b8;
+  font-weight: 500;
+}
+
+.text-muted {
+  color: #6c757d;
+  font-style: italic;
+}
+
+.action-button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.action-button.edit {
+  background-color: #17a2b8;
+  color: white;
+}
+
+.action-button.edit:hover {
+  background-color: #138496;
+}
+
+.action-button.delete {
+  background-color: #dc3545;
+  color: white;
+}
+
+.action-button.delete:hover {
+  background-color: #c82333;
+}
+
+.action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Modal overlay for create/edit forms */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+/* Modal content styles are now handled by the more specific selector above */
+
+.modal-footer {
+  padding: 24px 28px;
+  border-top: 1px solid #e9ecef;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  background-color: #f8f9fa;
+}
+
+.form-group {
+  margin-bottom: 24px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 500;
+  color: #333;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.form-group small {
+  display: block;
+  margin-top: 8px;
+  color: #666;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.form-group input[type="checkbox"] {
+  width: auto;
+  margin-right: 10px;
+}
+
+.form-group label input[type="checkbox"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cancel-button {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.cancel-button:hover {
+  background-color: #5a6268;
+}
+
+.add-button {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.add-button:hover:not(:disabled) {
+  background-color: #218838;
+}
+
+.add-button:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+} 
+
+/* Schedule Details Modal */
+.schedule-details-modal {
+  max-width: 2600px;
+  width: 90%;
+  max-height: 90vh;
+}
+
+.schedule-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 60px;
+  width: 100%;
+}
+
+.detail-section {
+  width: 100%;
+}
+
+.detail-section h4 {
+  margin: 0 0 24px 0;
+  color: #333;
+  font-size: 1.3rem;
+  border-bottom: 2px solid #e9ecef;
+  padding-bottom: 16px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 20px 0;
+  border-bottom: 1px solid #f8f9fa;
+  width: 100%;
+}
+
+.detail-item:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  font-weight: 500;
+  color: #555;
+  font-size: 0.95rem;
+  min-width: 200px;
+  flex-shrink: 0;
+}
+
+.detail-value {
+  color: #333;
+  font-weight: 400;
+  font-size: 0.95rem;
+  text-align: right;
+  flex: 1;
+  margin-left: 24px;
+  word-wrap: break-word;
+}
+
+.detail-value.success {
+  color: #28a745;
+}
+
+.detail-value.error {
+  color: #dc3545;
+}
+
+.output-text {
+  background: #f8f9fa;
+  padding: 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 150px;
+  overflow-y: auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.error-text {
+  background: #f8d7da;
+  color: #721c24;
+  padding: 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 150px;
+  overflow-y: auto;
+  width: 100%;
+  box-sizing: border-box;
+} 
+
+.workflow-schedules-modal .modal-content,
+.workflow-schedules-overlay .modal-content {
+  background: white ;
+  border-radius: 8px ;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15) ;
+  width: 90% ;
+  max-width: 1000px ;
+  max-height: 90vh ;
+  overflow: hidden ;
+  padding: 0 ;
+} 

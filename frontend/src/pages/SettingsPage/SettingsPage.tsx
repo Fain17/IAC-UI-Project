@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import tokenManager from '../../utils/tokenManager';
-import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequest, AdminUsersResponse, updateUserPermissionsNew as updateUserPermissionsAPI, UpdateUserPermissionsRequest, deleteUser, updateUserActiveStatus, getAllUsersPermissionsNew, getAdminGroups, createAdminGroup, addUserToGroup, removeUserFromGroup, getUserGroups, AdminGroup, AdminGroupUser, getGroupUsers, deleteAdminGroup, updateAdminGroup } from '../../api';
+import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequest, AdminUsersResponse, updateUserPermissionsNew as updateUserPermissionsAPI, UpdateUserPermissionsRequest, deleteUser, updateUserActiveStatus, getAllUsersPermissionsNew, getAdminGroups, createAdminGroup, addUserToGroup, removeUserFromGroup, getUserGroups, AdminGroup, AdminGroupUser, getGroupUsers, deleteAdminGroup, updateAdminGroup, getRolePermissions, getRolePermissionsByRole, resetRolePermissions, addRolePermission, removeRolePermission, AddRolePermissionRequest, RemoveRolePermissionRequest, RolePermission } from '../../api';
 import './SettingsPage.css';
 
 interface User {
@@ -82,6 +82,15 @@ const SettingsPage: React.FC = () => {
   const [userGroups, setUserGroups] = useState<UserGroup[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
+  const [filteredRolePermissions, setFilteredRolePermissions] = useState<RolePermission[]>([]);
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('');
+  const [showAddPermissionModal, setShowAddPermissionModal] = useState(false);
+  const [addPermissionForm, setAddPermissionForm] = useState<AddRolePermissionRequest>({
+    role: '',
+    permission: '',
+    resource_type: ''
+  });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -270,17 +279,142 @@ const SettingsPage: React.FC = () => {
   const loadRoles = useCallback(async () => {
     setLoading(true);
     try {
-      // Mock data for now
-      setRoles([
-        { id: 1, name: 'Admin', description: 'Full system access', permissions: ['read', 'write', 'delete'], user_count: 2, created_at: '2024-01-01' },
-        { id: 2, name: 'User', description: 'Limited access', permissions: ['read'], user_count: 5, created_at: '2024-01-01' }
-      ]);
+      const response = await getRolePermissions();
+      const rolePermissionsData = response.data.permissions || [];
+      setRolePermissions(rolePermissionsData);
+      
+      // Group permissions by role
+      const rolesMap = new Map<string, { permissions: string[], resourceTypes: string[] }>();
+      
+      rolePermissionsData.forEach((rp: RolePermission) => {
+        if (!rolesMap.has(rp.role)) {
+          rolesMap.set(rp.role, { permissions: [], resourceTypes: [] });
+        }
+        const roleData = rolesMap.get(rp.role)!;
+        roleData.permissions.push(...rp.permissions);
+        roleData.resourceTypes.push(rp.resource_type);
+      });
+      
+      // Convert to Role format for display
+      const rolesData: Role[] = Array.from(rolesMap.entries()).map(([roleName, data]) => ({
+        id: roleName === 'admin' ? 1 : roleName === 'manager' ? 2 : 3,
+        name: roleName.charAt(0).toUpperCase() + roleName.slice(1),
+        description: `${roleName.charAt(0).toUpperCase() + roleName.slice(1)} role with access to ${data.resourceTypes.join(', ')} resources`,
+        permissions: [...new Set(data.permissions)], // Remove duplicates
+        user_count: 0, // Will be calculated separately
+        created_at: new Date().toISOString()
+      }));
+      
+      setRoles(rolesData);
+      
+      // Initialize filtered permissions with all data
+      setFilteredRolePermissions(rolePermissionsData);
     } catch (error: any) {
-      setMessage({ type: 'error', text: 'Failed to load roles: ' + error.message });
+      setMessage({ type: 'error', text: 'Failed to load roles: ' + (error.response?.data?.detail || error.message) });
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Filter role permissions by role
+  const filterRolePermissions = useCallback(async (role?: string) => {
+    try {
+      setLoading(true);
+      let response;
+      
+      if (role) {
+        // Filter by role
+        response = await getRolePermissionsByRole(role);
+        if (response.data.success) {
+          setFilteredRolePermissions(response.data.permissions);
+        }
+      } else {
+        // No filters - show all
+        setFilteredRolePermissions(rolePermissions);
+      }
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to filter permissions: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  }, [rolePermissions]);
+
+  // Handle role filter change
+  const handleRoleFilterChange = (role: string) => {
+    setSelectedRoleFilter(role);
+    filterRolePermissions(role || undefined);
+  };
+
+  // Clear all filters
+  const clearFilters = () => {
+    setSelectedRoleFilter('');
+    setFilteredRolePermissions(rolePermissions);
+  };
+
+  // Reset role permissions for a specific role
+  const handleResetRolePermissions = async (role: string) => {
+    if (!window.confirm(`Are you sure you want to reset permissions for role "${role}"? This will restore default permissions and cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await resetRolePermissions(role);
+      setMessage({ type: 'success', text: `Role permissions for "${role}" have been reset successfully!` });
+      
+      // Refresh the data
+      await loadRoles();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to reset role permissions: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Add role permission
+  const handleAddRolePermission = async () => {
+    if (!addPermissionForm.role || !addPermissionForm.permission || !addPermissionForm.resource_type) {
+      setMessage({ type: 'error', text: 'Please fill in all fields' });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await addRolePermission(addPermissionForm);
+      setMessage({ type: 'success', text: 'Role permission added successfully!' });
+      
+      // Close modal and reset form
+      setShowAddPermissionModal(false);
+      setAddPermissionForm({ role: '', permission: '', resource_type: '' });
+      
+      // Refresh the data
+      await loadRoles();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to add role permission: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Remove role permission
+  const handleRemoveRolePermission = async (role: string, permission: string, resourceType: string) => {
+    if (!window.confirm(`Are you sure you want to remove "${permission}" permission for "${role}" role on "${resourceType}" resource?`)) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await removeRolePermission({ role, permission, resource_type: resourceType });
+      setMessage({ type: 'success', text: 'Role permission removed successfully!' });
+      
+      // Refresh the data
+      await loadRoles();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to remove role permission: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Load permissions function
   const loadPermissions = useCallback(async () => {
@@ -752,14 +886,78 @@ const SettingsPage: React.FC = () => {
             <div className="settings-section">
               <div className="section-header">
                 <h2>Roles & Permissions</h2>
-                {userIsAdmin && (
-                  <button 
-                    onClick={() => setShowRoleForm(true)}
-                    className="create-button"
-                  >
-                    ➕ Add Role
-                  </button>
-                )}
+                <p>Detailed view of role permissions across different resource types</p>
+              </div>
+              
+              {/* Filter Controls */}
+              <div className="filter-controls" style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
+                <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                    <div>
+                      <label htmlFor="role-filter" style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Filter by Role:</label>
+                      <select 
+                        id="role-filter"
+                        value={selectedRoleFilter} 
+                        onChange={(e) => handleRoleFilterChange(e.target.value)}
+                        style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                      >
+                        <option value="">All Roles</option>
+                        <option value="admin">Admin</option>
+                        <option value="manager">Manager</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    </div>
+                    
+                    <button 
+                      onClick={clearFilters}
+                      style={{ 
+                        padding: '8px 16px', 
+                        backgroundColor: '#6c757d', 
+                        color: 'white', 
+                        border: 'none', 
+                        borderRadius: '4px', 
+                        cursor: 'pointer' 
+                      }}
+                    >
+                      Clear Filters
+                    </button>
+                  </div>
+                  
+                  {userIsAdmin && (
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button 
+                        onClick={() => setShowAddPermissionModal(true)}
+                        disabled={loading}
+                        style={{ 
+                          padding: '8px 16px', 
+                          backgroundColor: '#28a745', 
+                          color: 'white', 
+                          border: 'none', 
+                          borderRadius: '4px', 
+                          cursor: 'pointer' 
+                        }}
+                        title="Add new role permission"
+                      >
+                        ➕ Add Permission
+                      </button>
+                      <button 
+                        onClick={() => handleResetRolePermissions(selectedRoleFilter || 'all')}
+                        disabled={loading}
+                        style={{ 
+                          padding: '8px 16px', 
+                          backgroundColor: '#dc3545', 
+                          color: 'white', 
+                          border: 'none', 
+                          borderRadius: '4px', 
+                          cursor: 'pointer' 
+                        }}
+                        title={selectedRoleFilter ? `Reset permissions for ${selectedRoleFilter} role` : 'Reset all role permissions'}
+                      >
+                        🔄 Reset Role Permissions
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               
               {loading ? (
@@ -769,38 +967,90 @@ const SettingsPage: React.FC = () => {
                   <table>
                     <thead>
                       <tr>
-                        <th>Role Name</th>
-                        <th>Description</th>
+                        <th>Role</th>
+                        <th>Resource Type</th>
                         <th>Permissions</th>
-                        <th>Users</th>
-                        <th>Created</th>
+                        <th>Last Updated</th>
                         {userIsAdmin && <th>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {roles.map((role) => (
-                        <tr key={role.id}>
-                          <td>{role.name}</td>
-                          <td>{role.description}</td>
+                      {filteredRolePermissions.map((rolePerm, index) => (
+                        <tr key={`${rolePerm.role}-${rolePerm.resource_type}-${index}`}>
+                          <td>
+                            <span className={`role-badge ${rolePerm.role}`}>
+                              {rolePerm.role.charAt(0).toUpperCase() + rolePerm.role.slice(1)}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="resource-badge">
+                              {rolePerm.resource_type.charAt(0).toUpperCase() + rolePerm.resource_type.slice(1)}
+                            </span>
+                          </td>
                           <td>
                             <div className="permissions-list">
-                              {role.permissions.map((permission, index) => (
-                                <span key={index} className="permission-badge">{permission}</span>
+                              {rolePerm.permissions.map((permission, permIndex) => (
+                                <span key={permIndex} className={`permission-badge ${permission}`}>
+                                  {permission}
+                                  {userIsAdmin && (
+                                    <button
+                                      onClick={() => handleRemoveRolePermission(rolePerm.role, permission, rolePerm.resource_type)}
+                                      disabled={loading}
+                                      style={{
+                                        marginLeft: '5px',
+                                        padding: '2px 6px',
+                                        fontSize: '10px',
+                                        backgroundColor: '#dc3545',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '3px',
+                                        cursor: 'pointer'
+                                      }}
+                                      title={`Remove ${permission} permission`}
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </span>
                               ))}
                             </div>
                           </td>
-                          <td>{role.user_count}</td>
-                          <td>{new Date(role.created_at).toLocaleDateString()}</td>
+                          <td>{new Date(rolePerm.updated_at).toLocaleDateString()}</td>
                           {userIsAdmin && (
                             <td>
-                              <button className="action-button edit">Edit</button>
-                              <button className="action-button delete">Delete</button>
+                              <button
+                                onClick={() => handleRemoveRolePermission(rolePerm.role, 'all', rolePerm.resource_type)}
+                                disabled={loading}
+                                style={{
+                                  padding: '4px 8px',
+                                  fontSize: '12px',
+                                  backgroundColor: '#ffc107',
+                                  color: '#212529',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer'
+                                }}
+                                title={`Remove all permissions for ${rolePerm.role} on ${rolePerm.resource_type}`}
+                              >
+                                Remove All
+                              </button>
                             </td>
                           )}
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  
+                  <div className="summary-stats" style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
+                    <h4>Summary</h4>
+                    <p><strong>Total Roles:</strong> {new Set(filteredRolePermissions.map(rp => rp.role)).size}</p>
+                    <p><strong>Total Resource Types:</strong> {new Set(filteredRolePermissions.map(rp => rp.resource_type)).size}</p>
+                    <p><strong>Total Permissions:</strong> {filteredRolePermissions.reduce((sum, rp) => sum + rp.permissions.length, 0)}</p>
+                    <p><strong>Filtered Results:</strong> {filteredRolePermissions.length} of {rolePermissions.length} entries</p>
+                    {selectedRoleFilter && (
+                      <p><strong>Current Filter:</strong> Role = "{selectedRoleFilter}"</p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -1094,6 +1344,69 @@ const SettingsPage: React.FC = () => {
                   <button className="action-button" onClick={handleAddUserToSelectedGroup} disabled={selectedUserIdToAdd === '' || loading}>Add</button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Role Permission Modal */}
+      {showAddPermissionModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>Add Role Permission</h3>
+              <button className="modal-close" onClick={() => setShowAddPermissionModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Role *</label>
+                <select 
+                  value={addPermissionForm.role} 
+                  onChange={(e) => setAddPermissionForm(prev => ({ ...prev, role: e.target.value }))}
+                  required
+                >
+                  <option value="">Select Role</option>
+                  <option value="admin">Admin</option>
+                  <option value="manager">Manager</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+              
+              <div className="form-group">
+                <label>Resource Type *</label>
+                <select 
+                  value={addPermissionForm.resource_type} 
+                  onChange={(e) => setAddPermissionForm(prev => ({ ...prev, resource_type: e.target.value }))}
+                  required
+                >
+                  <option value="">Select Resource Type</option>
+                  <option value="group">Group</option>
+                  <option value="system">System</option>
+                  <option value="user">User</option>
+                  <option value="workflow">Workflow</option>
+                </select>
+              </div>
+              
+              <div className="form-group">
+                <label>Permission *</label>
+                <select 
+                  value={addPermissionForm.permission} 
+                  onChange={(e) => setAddPermissionForm(prev => ({ ...prev, permission: e.target.value }))}
+                  required
+                >
+                  <option value="">Select Permission</option>
+                  <option value="read">Read</option>
+                  <option value="write">Write</option>
+                  <option value="execute">Execute</option>
+                  <option value="delete">Delete</option>
+                </select>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="cancel-button" onClick={() => setShowAddPermissionModal(false)}>Cancel</button>
+              <button className="add-button" onClick={handleAddRolePermission} disabled={loading}>
+                {loading ? 'Adding...' : 'Add Permission'}
+              </button>
             </div>
           </div>
         </div>
