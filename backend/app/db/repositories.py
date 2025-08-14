@@ -454,6 +454,787 @@ class UserRepository:
             logger.error(f"Error updating user admin status: {e}")
             return False
 
+
+class RolePermissionRepository:
+    """Repository for managing role permissions."""
+    
+    @staticmethod
+    async def get_all() -> List[Dict]:
+        """Get all role permissions."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT role, permission, resource_type, created_at, updated_at
+                FROM role_permissions
+                ORDER BY role, resource_type, permission
+            """)
+            
+            permissions = []
+            for row in result.rows:
+                permissions.append({
+                    "role": row[0],
+                    "permission": row[1],
+                    "resource_type": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
+            return permissions
+        except Exception as e:
+            logger.error(f"Error getting all role permissions: {e}")
+            return []
+    
+    @staticmethod
+    async def get_by_role(role: str) -> List[Dict]:
+        """Get permissions for a specific role."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT role, permission, resource_type, created_at, updated_at
+                FROM role_permissions
+                WHERE role = ?
+                ORDER BY resource_type, permission
+            """, [role])
+            
+            permissions = []
+            for row in result.rows:
+                permissions.append({
+                    "role": row[0],
+                    "permission": row[1],
+                    "resource_type": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
+            return permissions
+        except Exception as e:
+            logger.error(f"Error getting permissions for role {role}: {e}")
+            return []
+    
+    @staticmethod
+    async def get_by_role_and_resource(role: str, resource_type: str) -> List[Dict]:
+        """Get permissions for a specific role and resource type."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT role, permission, resource_type, created_at, updated_at
+                FROM role_permissions
+                WHERE role = ? AND resource_type = ?
+                ORDER BY permission
+            """, [role, resource_type])
+            
+            permissions = []
+            for row in result.rows:
+                permissions.append({
+                    "role": row[0],
+                    "permission": row[1],
+                    "resource_type": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
+            return permissions
+        except Exception as e:
+            logger.error(f"Error getting permissions for role {role} and resource {resource_type}: {e}")
+            return []
+    
+    @staticmethod
+    async def add_permission(role: str, permission: str, resource_type: str) -> bool:
+        """Add a permission to a role."""
+        if not db_service.client:
+            return False
+        
+        # Prevent adding permissions to admin role (admin always has all permissions)
+        if role == "admin":
+            logger.warning(f"Attempted to add permission {permission} to admin role - operation blocked")
+            return False
+            
+        try:
+            result = await db_service.client.execute("""
+                INSERT INTO role_permissions (role, permission, resource_type)
+                VALUES (?, ?, ?)
+            """, [role, permission, resource_type])
+            return True
+        except Exception as e:
+            logger.error(f"Error adding permission {permission} to role {role} for resource {resource_type}: {e}")
+            return False
+    
+    @staticmethod
+    async def remove_permission(role: str, permission: str, resource_type: str) -> bool:
+        """Remove a permission from a role."""
+        if not db_service.client:
+            return False
+        
+        # Prevent removal of admin role permissions
+        if role == "admin":
+            logger.warning(f"Attempted to remove permission {permission} from admin role - operation blocked")
+            return False
+            
+        try:
+            result = await db_service.client.execute("""
+                DELETE FROM role_permissions
+                WHERE role = ? AND permission = ? AND resource_type = ?
+            """, [role, permission, resource_type])
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error removing permission {permission} from role {role} for resource {resource_type}: {e}")
+            return False
+    
+    @staticmethod
+    async def ensure_admin_permissions():
+        """Ensure admin role always has all permissions on all resources."""
+        if not db_service.client:
+            return False
+            
+        try:
+            # Define all possible permissions for admin role
+            admin_permissions = [
+                ("admin", "read", "workflow"),
+                ("admin", "write", "workflow"),
+                ("admin", "delete", "workflow"),
+                ("admin", "execute", "workflow"),
+                ("admin", "read", "user"),
+                ("admin", "write", "user"),
+                ("admin", "delete", "user"),
+                ("admin", "execute", "user"),
+                ("admin", "read", "group"),
+                ("admin", "write", "group"),
+                ("admin", "delete", "group"),
+                ("admin", "execute", "group"),
+                ("admin", "read", "system"),
+                ("admin", "write", "system"),
+                ("admin", "delete", "system"),
+                ("admin", "execute", "system"),
+            ]
+            
+            # Check and add any missing admin permissions
+            for role, permission, resource_type in admin_permissions:
+                if not await RolePermissionRepository.has_permission(role, permission, resource_type):
+                    await RolePermissionRepository.add_permission(role, permission, resource_type)
+                    logger.info(f"Added missing admin permission: {permission} on {resource_type}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error ensuring admin permissions: {e}")
+            return False
+    
+    @staticmethod
+    async def has_permission(role: str, permission: str, resource_type: str) -> bool:
+        """Check if a role has a specific permission."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute("""
+                SELECT COUNT(*) FROM role_permissions
+                WHERE role = ? AND permission = ? AND resource_type = ?
+            """, [role, permission, resource_type])
+            return result.rows[0][0] > 0
+        except Exception as e:
+            logger.error(f"Error checking permission {permission} for role {role} on resource {resource_type}: {e}")
+            return False
+    
+    @staticmethod
+    async def get_roles() -> List[str]:
+        """Get all available roles."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT DISTINCT role FROM role_permissions
+                ORDER BY role
+            """)
+            return [row[0] for row in result.rows]
+        except Exception as e:
+            logger.error(f"Error getting roles: {e}")
+            return []
+    
+    @staticmethod
+    async def get_resource_types() -> List[str]:
+        """Get all available resource types."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT DISTINCT resource_type FROM role_permissions
+                ORDER BY resource_type
+            """)
+            return [row[0] for row in result.rows]
+        except Exception as e:
+            logger.error(f"Error getting resource types: {e}")
+            return []
+    
+    @staticmethod
+    async def get_permissions() -> List[str]:
+        """Get all available permissions."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT DISTINCT permission FROM role_permissions
+                ORDER BY permission
+            """)
+            return [row[0] for row in result.rows]
+        except Exception as e:
+            logger.error(f"Error getting permissions: {e}")
+            return []
+
+
+class WorkflowShareRepository:
+    """Repository for managing workflow shares with groups."""
+    
+    @staticmethod
+    async def share(workflow_id: str, group_id: str, permission: str = "read") -> Optional[int]:
+        """Share a workflow with a group."""
+        if not db_service.client:
+            return None
+        try:
+            # Check if workflow is already shared with this group
+            existing_share = await db_service.client.execute("""
+                SELECT id, permission FROM workflow_shares
+                WHERE workflow_id = ? AND group_id = ?
+            """, [workflow_id, group_id])
+            
+            if existing_share.rows:
+                # Update existing share with new permission
+                existing_id = existing_share.rows[0][0]
+                old_permission = existing_share.rows[0][1]
+                
+                await db_service.client.execute("""
+                    UPDATE workflow_shares 
+                    SET permission = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, [permission, existing_id])
+                
+                logger.info(f"Updated existing workflow share: workflow {workflow_id} with group {group_id}, permission changed from {old_permission} to {permission}")
+                return existing_id
+            else:
+                # Create new share
+                result = await db_service.client.execute("""
+                    INSERT INTO workflow_shares (workflow_id, group_id, permission)
+                    VALUES (?, ?, ?)
+                """, [workflow_id, group_id, permission])
+                
+                if result.rows_affected > 0:
+                    # Try to get the ID of the newly inserted row
+                    id_result = await db_service.client.execute("""
+                        SELECT id FROM workflow_shares 
+                        WHERE workflow_id = ? AND group_id = ? 
+                        ORDER BY created_at DESC LIMIT 1
+                    """, [workflow_id, group_id])
+                    
+                    if id_result.rows:
+                        logger.info(f"Created new workflow share: workflow {workflow_id} with group {group_id}, permission: {permission}")
+                        return id_result.rows[0][0]
+                    else:
+                        logger.info(f"Created new workflow share: workflow {workflow_id} with group {group_id}, permission: {permission}")
+                        return True  # Fallback to True if we can't get the ID
+                return None
+        except Exception as e:
+            logger.error(f"Error sharing workflow {workflow_id} with group {group_id}: {e}")
+            return None
+    
+    @staticmethod
+    async def unshare(workflow_id: str, group_id: str) -> bool:
+        """Remove a workflow's share with a group."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute("""
+                DELETE FROM workflow_shares
+                WHERE workflow_id = ? AND group_id = ?
+            """, [workflow_id, group_id])
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error unsharing workflow {workflow_id} from group {group_id}: {e}")
+            return False
+    
+    @staticmethod
+    async def get_by_workflow(workflow_id: str) -> List[Dict]:
+        """Get all shares for a specific workflow."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT workflow_id, group_id, permission, created_at, updated_at
+                FROM workflow_shares
+                WHERE workflow_id = ?
+                ORDER BY created_at
+            """, [workflow_id])
+            
+            shares = []
+            for row in result.rows:
+                shares.append({
+                    "workflow_id": row[0],
+                    "group_id": row[1],
+                    "permission": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
+            return shares
+        except Exception as e:
+            logger.error(f"Error getting shares for workflow {workflow_id}: {e}")
+            return []
+    
+    @staticmethod
+    async def get_by_group(group_id: str) -> List[Dict]:
+        """Get all workflows shared with a specific group."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT workflow_id, group_id, permission, created_at, updated_at
+                FROM workflow_shares
+                WHERE group_id = ?
+                ORDER BY created_at
+            """, [group_id])
+            
+            shares = []
+            for row in result.rows:
+                shares.append({
+                    "workflow_id": row[0],
+                    "group_id": row[1],
+                    "permission": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
+            return shares
+        except Exception as e:
+            logger.error(f"Error getting shares for group {group_id}: {e}")
+            return []
+    
+    @staticmethod
+    async def get_shared_workflows_for_user(user_id: str) -> List[Dict]:
+        """Get all workflows shared with groups that the user is a member of."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT DISTINCT ws.workflow_id, ws.group_id, ws.permission, ws.created_at, ws.updated_at
+                FROM workflow_shares ws
+                JOIN user_group_assignments uga ON ws.group_id = uga.group_id
+                WHERE uga.user_id = ?
+                ORDER BY ws.created_at
+            """, [user_id])
+            
+            shares = []
+            for row in result.rows:
+                shares.append({
+                    "workflow_id": row[0],
+                    "group_id": row[1],
+                    "permission": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
+            return shares
+        except Exception as e:
+            logger.error(f"Error getting shared workflows for user {user_id}: {e}")
+            return []
+    
+    @staticmethod
+    async def check_access(workflow_id: str, user_id: str) -> Optional[str]:
+        """Check if a user has access to a workflow through group sharing."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute("""
+                SELECT ws.permission
+                FROM workflow_shares ws
+                JOIN user_group_assignments uga ON ws.group_id = uga.group_id
+                WHERE ws.workflow_id = ? AND uga.user_id = ?
+                LIMIT 1
+            """, [workflow_id, user_id])
+            
+            if result.rows:
+                return result.rows[0][0]
+            return None
+        except Exception as e:
+            logger.error(f"Error checking workflow access for user {user_id}: {e}")
+            return None
+    
+    @staticmethod
+    async def get_share_info(workflow_id: str, group_id: str) -> Optional[Dict]:
+        """Get information about a specific workflow share with a group."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute("""
+                SELECT id, workflow_id, group_id, permission, created_at, updated_at
+                FROM workflow_shares
+                WHERE workflow_id = ? AND group_id = ?
+            """, [workflow_id, group_id])
+            
+            if result.rows:
+                row = result.rows[0]
+                return {
+                    "id": row[0],
+                    "workflow_id": row[1],
+                    "group_id": row[2],
+                    "permission": row[3],
+                    "created_at": row[4],
+                    "updated_at": row[5]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error getting share info for workflow {workflow_id} with group {group_id}: {e}")
+            return None
+    
+    @staticmethod
+    async def remove_all_for_workflow(workflow_id: str) -> bool:
+        """Remove all shares for a specific workflow (useful when deleting workflows)."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute("""
+                DELETE FROM workflow_shares
+                WHERE workflow_id = ?
+            """, [workflow_id])
+            return True
+        except Exception as e:
+            logger.error(f"Error removing all shares for workflow {workflow_id}: {e}")
+            return False
+    
+    @staticmethod
+    async def remove_all_for_group(group_id: str) -> bool:
+        """Remove all shares for a specific group (useful when deleting groups)."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute("""
+                DELETE FROM workflow_shares
+                WHERE group_id = ?
+            """, [group_id])
+            return True
+        except Exception as e:
+            logger.error(f"Error removing all shares for group {group_id}: {e}")
+            return False
+
+
+class WorkflowScheduleRepository:
+    """Repository for managing workflow schedules."""
+    
+    @staticmethod
+    async def get_all() -> List[Dict]:
+        """Get all workflow schedules."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT id, workflow_id, user_id, schedule_type, schedule_value, is_active, 
+                       continue_on_failure, description, created_at, updated_at, last_execution
+                FROM workflow_schedules
+                ORDER BY created_at DESC
+            """)
+            
+            schedules = []
+            for row in result.rows:
+                schedules.append({
+                    "id": row[0],
+                    "workflow_id": row[1],
+                    "user_id": row[2],
+                    "schedule_type": row[3],
+                    "schedule_value": row[4],
+                    "is_active": bool(row[5]),
+                    "continue_on_failure": bool(row[6]),
+                    "description": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9],
+                    "last_execution": row[10]
+                })
+            return schedules
+        except Exception as e:
+            logger.error(f"Error getting all workflow schedules: {e}")
+            return []
+    
+    @staticmethod
+    async def get_all_active() -> List[Dict]:
+        """Get all active workflow schedules."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT id, workflow_id, user_id, schedule_type, schedule_value, is_active, 
+                       continue_on_failure, description, created_at, updated_at, last_execution
+                FROM workflow_schedules
+                WHERE is_active = TRUE
+                ORDER BY created_at DESC
+            """)
+            
+            schedules = []
+            for row in result.rows:
+                schedules.append({
+                    "id": row[0],
+                    "workflow_id": row[1],
+                    "user_id": row[2],
+                    "schedule_type": row[3],
+                    "schedule_value": row[4],
+                    "is_active": bool(row[5]),
+                    "continue_on_failure": bool(row[6]),
+                    "description": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9],
+                    "last_execution": row[10]
+                })
+            return schedules
+        except Exception as e:
+            logger.error(f"Error getting active workflow schedules: {e}")
+            return []
+    
+    @staticmethod
+    async def get_by_id(schedule_id: str) -> Optional[Dict]:
+        """Get a workflow schedule by ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute("""
+                SELECT id, workflow_id, user_id, schedule_type, schedule_value, is_active, 
+                       continue_on_failure, description, created_at, updated_at, last_execution
+                FROM workflow_schedules
+                WHERE id = ?
+            """, [schedule_id])
+            
+            if result.rows:
+                row = result.rows[0]
+                return {
+                    "id": row[0],
+                    "workflow_id": row[1],
+                    "user_id": row[2],
+                    "schedule_type": row[3],
+                    "schedule_value": row[4],
+                    "is_active": bool(row[5]),
+                    "continue_on_failure": bool(row[6]),
+                    "description": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9],
+                    "last_execution": row[10]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error getting workflow schedule {schedule_id}: {e}")
+            return None
+    
+    @staticmethod
+    async def get_by_workflow(workflow_id: str) -> List[Dict]:
+        """Get all schedules for a specific workflow."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT id, workflow_id, user_id, schedule_type, schedule_value, is_active, 
+                       continue_on_failure, description, created_at, updated_at, last_execution
+                FROM workflow_schedules
+                WHERE workflow_id = ?
+                ORDER BY created_at DESC
+            """, [workflow_id])
+            
+            schedules = []
+            for row in result.rows:
+                schedules.append({
+                    "id": row[0],
+                    "workflow_id": row[1],
+                    "user_id": row[2],
+                    "schedule_type": row[3],
+                    "schedule_value": row[4],
+                    "is_active": bool(row[5]),
+                    "continue_on_failure": bool(row[6]),
+                    "description": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9],
+                    "last_execution": row[10]
+                })
+            return schedules
+        except Exception as e:
+            logger.error(f"Error getting schedules for workflow {workflow_id}: {e}")
+            return []
+    
+    @staticmethod
+    async def get_by_user_id(user_id: str) -> List[Dict]:
+        """Get all schedules for a specific user."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT id, workflow_id, user_id, schedule_type, schedule_value, is_active, 
+                       continue_on_failure, description, created_at, updated_at, last_execution
+                FROM workflow_schedules
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            """, [user_id])
+            
+            schedules = []
+            for row in result.rows:
+                schedules.append({
+                    "id": row[0],
+                    "workflow_id": row[1],
+                    "user_id": row[2],
+                    "schedule_type": row[3],
+                    "schedule_value": row[4],
+                    "is_active": bool(row[5]),
+                    "continue_on_failure": bool(row[6]),
+                    "description": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9],
+                    "last_execution": row[10]
+                })
+            return schedules
+        except Exception as e:
+            logger.error(f"Error getting schedules for user {user_id}: {e}")
+            return []
+    
+    @staticmethod
+    async def create(workflow_id: str, user_id: str, schedule_type: str, schedule_value: str,
+                    description: str = None, continue_on_failure: bool = True) -> Optional[str]:
+        """Create a new workflow schedule."""
+        if not db_service.client:
+            return None
+        try:
+            import uuid
+            
+            # Generate UUID for schedule ID
+            schedule_id = f"schedule_{str(uuid.uuid4())}"
+            
+            result = await db_service.client.execute("""
+                INSERT INTO workflow_schedules (id, workflow_id, user_id, schedule_type, schedule_value,
+                                             description, continue_on_failure, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
+            """, [schedule_id, workflow_id, user_id, schedule_type, schedule_value, description, continue_on_failure])
+            
+            if result.rows_affected > 0:
+                return schedule_id
+            return None
+        except Exception as e:
+            logger.error(f"Error creating workflow schedule: {e}")
+            return None
+    
+    @staticmethod
+    async def update(schedule_id: str, schedule_type: str = None, schedule_value: str = None,
+                    description: str = None, is_active: bool = None, continue_on_failure: bool = None) -> bool:
+        """Update a workflow schedule."""
+        if not db_service.client:
+            return False
+        try:
+            update_fields = []
+            params = []
+            
+            if schedule_type is not None:
+                update_fields.append("schedule_type = ?")
+                params.append(schedule_type)
+            
+            if schedule_value is not None:
+                update_fields.append("schedule_value = ?")
+                params.append(schedule_value)
+            
+            if description is not None:
+                update_fields.append("description = ?")
+                params.append(description)
+            
+            if is_active is not None:
+                update_fields.append("is_active = ?")
+                params.append(is_active)
+            
+            if continue_on_failure is not None:
+                update_fields.append("continue_on_failure = ?")
+                params.append(continue_on_failure)
+            
+            if not update_fields:
+                return True  # Nothing to update
+            
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(schedule_id)
+            
+            query = f"""
+                UPDATE workflow_schedules 
+                SET {', '.join(update_fields)}
+                WHERE id = ?
+            """
+            
+            result = await db_service.client.execute(query, params)
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating workflow schedule {schedule_id}: {e}")
+            return False
+    
+    @staticmethod
+    async def update_last_execution(schedule_id: str, execution_time: datetime) -> bool:
+        """Update the last execution time of a schedule."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute("""
+                UPDATE workflow_schedules 
+                SET last_execution = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, [execution_time.isoformat(), schedule_id])
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating last execution for schedule {schedule_id}: {e}")
+            return False
+    
+    @staticmethod
+    async def delete(schedule_id: str) -> bool:
+        """Delete a workflow schedule."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute("""
+                DELETE FROM workflow_schedules WHERE id = ?
+            """, [schedule_id])
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting workflow schedule {schedule_id}: {e}")
+            return False
+    
+    @staticmethod
+    async def validate_schedule(schedule_type: str, schedule_value: str) -> bool:
+        """Validate a schedule type and value."""
+        try:
+            if schedule_type == "interval":
+                # Validate interval format (e.g., "30m", "2h", "1d")
+                if not schedule_value or len(schedule_value) < 2:
+                    return False
+                value = int(schedule_value[:-1])
+                unit = schedule_value[-1].lower()
+                return unit in ['m', 'h', 'd'] and value > 0
+            
+            elif schedule_type == "daily":
+                # Validate time format (e.g., "09:00", "14:30")
+                if not schedule_value or ':' not in schedule_value:
+                    return False
+                hour, minute = map(int, schedule_value.split(':'))
+                return 0 <= hour <= 23 and 0 <= minute <= 59
+            
+            elif schedule_type == "weekly":
+                # Validate day:time format (e.g., "monday:09:00")
+                if not schedule_value or ':' not in schedule_value:
+                    return False
+                day_str, time_str = schedule_value.split(':', 1)
+                valid_days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+                if day_str.lower() not in valid_days:
+                    return False
+                # Validate time part
+                if ':' not in time_str:
+                    return False
+                hour, minute = map(int, time_str.split(':'))
+                return 0 <= hour <= 23 and 0 <= minute <= 59
+            
+            elif schedule_type == "monthly":
+                # Validate day:time format (e.g., "15:09:00")
+                if not schedule_value or ':' not in schedule_value:
+                    return False
+                day_str, time_str = schedule_value.split(':', 1)
+                day = int(day_str)
+                if day < 1 or day > 31:
+                    return False
+                # Validate time part
+                if ':' not in time_str:
+                    return False
+                hour, minute = map(int, time_str.split(':'))
+                return 0 <= hour <= 23 and 0 <= minute <= 59
+            
+            return False
+        except Exception:
+            return False
+
+
 class UserSessionRepository:
     """Repository for user session operations."""
     @staticmethod
@@ -967,6 +1748,35 @@ class WorkflowRepository:
             }
         except Exception as e:
             logger.error(f"Error getting workflow by ID: {e}")
+            return None
+    
+    @staticmethod
+    async def get_by_id_admin(workflow_id: str) -> Optional[Dict]:
+        """Get workflow by ID without user restriction (admin use)."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, user_id, name, description, steps, is_active, created_at, updated_at FROM workflows WHERE id = ?",
+                [workflow_id]
+            )
+            
+            if not result.rows:
+                return None
+            
+            workflow = result.rows[0]
+            return {
+                "id": workflow[0],
+                "user_id": workflow[1],
+                "name": workflow[2],
+                "description": workflow[3],
+                "steps": json.loads(workflow[4]),
+                "is_active": bool(workflow[5]),
+                "created_at": workflow[6],
+                "updated_at": workflow[7]
+            }
+        except Exception as e:
+            logger.error(f"Error getting workflow by ID (admin): {e}")
             return None
     
     @staticmethod

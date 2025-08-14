@@ -3,8 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes import home_router, settings_router, workflow_router, file_router, execution_router
 from app.routes.admin_routes import router as admin_router
 from app.routes.websocket_routes import router as websocket_router
+from app.routes.workflow_automation_routes import router as workflow_automation_router
 from app.auth import auth_router
 from app.db.database import db_service
+from app.services.workflow_automation_service import workflow_automation_service
 import logging
 
 # Configure logging
@@ -31,12 +33,14 @@ app.include_router(execution_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(websocket_router)
+app.include_router(workflow_automation_router)
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup."""
     try:
         await db_service.initialize()
+        await workflow_automation_service.start_scheduler()
         logger.info("Application started successfully")
     except Exception as e:
         logger.error(f"Failed to initialize application: {e}")
@@ -46,6 +50,7 @@ async def startup_event():
 async def shutdown_event():
     """Clean up resources on shutdown."""
     try:
+        await workflow_automation_service.stop_scheduler()
         await db_service.close()
         logger.info("Application shutdown successfully")
     except Exception as e:

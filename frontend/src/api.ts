@@ -544,3 +544,200 @@ export const updateWorkflow = (workflowId: string, workflowData: { name?: string
 
 export const deleteWorkflow = (workflowId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
   API.delete(`/workflow/${workflowId}`); 
+
+// Get all workflows for admin
+export const getAllWorkflows = (): Promise<AxiosResponse<{
+  success: boolean;
+  workflows: Workflow[];
+  count: number;
+}>> => 
+  API.get('/admin/workflows');
+
+// Workflow Automation Schedules API
+export interface WorkflowSchedule {
+  id: string;
+  workflow_id: string;
+  schedule_type: string;
+  schedule_value: string;
+  description: string;
+  continue_on_failure: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateWorkflowScheduleRequest {
+  workflow_id: string;
+  schedule_type: string;
+  schedule_value: string;
+  description: string;
+  continue_on_failure: boolean;
+}
+
+export interface UpdateWorkflowScheduleRequest {
+  schedule_type?: string;
+  schedule_value?: string;
+  description?: string;
+  continue_on_failure?: boolean;
+}
+
+export const createWorkflowSchedule = (data: CreateWorkflowScheduleRequest): Promise<AxiosResponse<{
+  success: boolean;
+  message: string;
+  schedule: WorkflowSchedule;
+}>> => 
+  API.post('/workflow-automation/schedules', data);
+
+export const getWorkflowSchedules = (workflowId: string): Promise<AxiosResponse<{
+  success: boolean;
+  schedules: WorkflowSchedule[];
+  count: number;
+}>> => 
+  API.get(`/workflow-automation/schedules?workflow_id=${workflowId}`);
+
+export const updateWorkflowSchedule = (scheduleId: string, data: UpdateWorkflowScheduleRequest): Promise<AxiosResponse<{
+  success: boolean;
+  message: string;
+  schedule: WorkflowSchedule;
+}>> => 
+  API.put(`/workflow-automation/schedules/${scheduleId}`, data);
+
+export const deleteWorkflowSchedule = (scheduleId: string): Promise<AxiosResponse<{
+  success: boolean;
+  message: string;
+}>> => 
+  API.delete(`/workflow-automation/schedules/${scheduleId}`);
+
+// Role Permissions API
+export interface RolePermission {
+  role: string;
+  resource_type: string;
+  permissions: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export const getRolePermissions = (): Promise<AxiosResponse<{
+  success: boolean;
+  permissions: RolePermission[];
+  count: number;
+  total_permissions: number;
+  note: string;
+}>> => 
+  API.get('/admin/role-permissions');
+
+// Get permissions for a specific role
+export const getRolePermissionsByRole = (role: string): Promise<AxiosResponse<{
+  success: boolean;
+  permissions: RolePermission[];
+  count: number;
+  role: string;
+}>> => 
+  API.get(`/admin/role-permissions/${role}`);
+
+// Reset role permissions for a specific role
+export const resetRolePermissions = (role: string): Promise<AxiosResponse<{
+  success: boolean;
+  message: string;
+  role: string;
+}>> => 
+  API.post(`/admin/role-permissions/reset/${role}`);
+
+// Add role permission
+export interface AddRolePermissionRequest {
+  role: string;
+  permission: string;
+  resource_type: string;
+}
+
+export const addRolePermission = (data: AddRolePermissionRequest): Promise<AxiosResponse<{
+  success: boolean;
+  message: string;
+  permission: RolePermission;
+}>> => 
+  API.post('/admin/role-permissions', data);
+
+// Remove role permission
+export interface RemoveRolePermissionRequest {
+  role: string;
+  permission: string;
+  resource_type: string;
+}
+
+export const removeRolePermission = (data: RemoveRolePermissionRequest): Promise<AxiosResponse<{
+  success: boolean;
+  message: string;
+}>> =>
+  API.delete('/admin/role-permissions', { data });
+
+// Get Schedule Status
+export interface ScheduleStatus {
+  schedule_id: string;
+  workflow_id: string;
+  workflow_name: string;
+  schedule_type: string;
+  schedule_value: string;
+  description: string;
+  is_active: boolean;
+  continue_on_failure: boolean;
+  created_at: string;
+  updated_at: string;
+  last_execution: string;
+  execution_status: string;
+  execution_details: {
+    last_execution_time: string;
+    status: string;
+    success: boolean;
+    execution_time: number;
+    output: string;
+    error: string | null;
+  };
+}
+
+export interface SchedulerStatus {
+  scheduler_running: boolean;
+  active_schedules: number;
+  total_tasks: number;
+  schedules: Array<{
+    schedule_id: string;
+    workflow_id: string;
+    schedule_type: string;
+    schedule_value: string;
+    is_active: boolean;
+    task_status: string;
+    next_run: string;
+  }>;
+}
+
+export interface ScheduleStatusResponse {
+  success: boolean;
+  user_schedules: ScheduleStatus[];
+  scheduler_status: SchedulerStatus;
+  count: number;
+  filters_applied: {
+    workflow_id: string | null;
+    schedule_id: string | null;
+  };
+  debug_info: {
+    total_db_schedules: number;
+    total_in_memory_schedules: number;
+    scheduler_running: boolean;
+  };
+}
+
+export const getScheduleStatus = (workflowId?: string, scheduleId?: string): Promise<AxiosResponse<ScheduleStatusResponse>> => {
+  let url = '/workflow-automation/schedules/status';
+  const params = new URLSearchParams();
+  
+  if (workflowId) {
+    params.append('workflow_id', workflowId);
+  }
+  if (scheduleId) {
+    params.append('schedule_id', scheduleId);
+  }
+  
+  if (params.toString()) {
+    url += `?${params.toString()}`;
+  }
+  
+  return API.get(url);
+};
