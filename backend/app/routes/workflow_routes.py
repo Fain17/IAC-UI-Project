@@ -935,8 +935,8 @@ async def share_workflow_with_group(
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found or access denied")
         from app.db.repositories import WorkflowShareRepository
-        mapping_id = await WorkflowShareRepository.share(workflow_id, group_id, permission)
-        if mapping_id is None:
+        result = await WorkflowShareRepository.share(workflow_id, group_id, permission)
+        if result is None:
             raise HTTPException(status_code=400, detail="Failed to share workflow with group")
         return JSONResponse({
             "success": True,

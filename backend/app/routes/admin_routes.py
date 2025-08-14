@@ -8,13 +8,32 @@ from app.services.user_management_service import (
 )
 from app.auth.dependencies import get_current_admin_user, get_current_user
 from app.db.models import AdminUserCreate, AdminUserPermissionUpdate, UserGroupCreate, UserGroupUpdate, UserRole
-from typing import List
+from typing import List, Optional
 import logging
 from app.db.repositories import WorkflowRepository
 from datetime import datetime
 from app.db.repositories import UserRepository, UserPermissionRepository
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+# Pydantic models for role permission management
+class RolePermissionAdd(BaseModel):
+    role: str  # admin, manager, viewer
+    permission: str  # read, write, delete, execute
+    resource_type: str  # workflow, user, group, system, etc.
+
+class RolePermissionRemove(BaseModel):
+    role: str  # admin, manager, viewer
+    permission: str  # read, write, delete, execute
+    resource_type: str  # workflow, user, group, system, etc.
+
+class RolePermissionResponse(BaseModel):
+    role: str
+    permission: str
+    resource_type: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 async def has_admin_role(user_id: str) -> bool:
     """
@@ -26,6 +45,33 @@ async def has_admin_role(user_id: str) -> bool:
         return permissions and permissions.get("role") == UserRole.ADMIN
     except Exception as e:
         logger.error(f"Error checking admin role for user {user_id}: {e}")
+        return False
+
+async def check_user_permission(user_id: str, permission: str, resource_type: str) -> bool:
+    """
+    Check if a user has a specific permission on a resource type.
+    This checks the user's role and then checks if that role has the required permission.
+    """
+    try:
+        # Get user's role
+        permissions = await get_user_permissions(user_id)
+        if not permissions:
+            return False
+        
+        user_role = permissions.get("role")
+        if not user_role:
+            return False
+        
+        # Admin role has all permissions
+        if user_role == UserRole.ADMIN:
+            return True
+        
+        # Check if the role has the specific permission
+        from app.db.repositories import RolePermissionRepository
+        return await RolePermissionRepository.has_permission(user_role, permission, resource_type)
+        
+    except Exception as e:
+        logger.error(f"Error checking permission {permission} for user {user_id} on resource {resource_type}: {e}")
         return False
 
 router = APIRouter(prefix="/admin")
@@ -918,4 +964,402 @@ async def test_admin_access_route(
         
     except Exception as e:
         logger.error(f"Error testing admin access: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error") 
+
+# Role Permission Management Endpoints
+# 
+# This system provides granular control over what each role can do:
+# 
+# ROLES:
+# - admin: Has all permissions by default (cannot be modified - always has read, write, delete, execute)
+# - manager: Can read/write/execute workflows, read users, read/write groups, read system
+# - viewer: Can only read workflows, users, groups, and system
+# 
+# PERMISSIONS:
+# - read: View/list resources
+# - write: Create/update resources  
+# - delete: Remove resources
+# - execute: Run/perform actions on resources
+# 
+# RESOURCE TYPES:
+# - workflow: Workflow management operations
+# - user: User management operations
+# - group: Group management operations
+# - system: System-level operations
+# 
+# IMPORTANT: Admin role permissions are immutable and always include all permissions on all resources.
+# Attempting to modify admin role permissions will result in an error.
+# 
+# USAGE:
+# - GET /admin/role-permissions - View all role permissions
+# - GET /admin/role-permissions/{role} - View permissions for specific role
+# - POST /admin/role-permissions - Add permission to role (admin role cannot be modified)
+# - DELETE /admin/role-permissions - Remove permission from role (admin role cannot be modified)
+# - POST /admin/role-permissions/reset/{role} - Reset role to defaults (admin role cannot be reset)
+#
+@router.get("/role-permissions", tags=["Admin Role Permissions"])
+async def get_all_role_permissions_route(
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Get all role permissions (admin only).
+    Returns a comprehensive list of all permissions for all roles in grouped format.
+    """
+    try:
+        from app.db.repositories import RolePermissionRepository
+        
+        permissions = await RolePermissionRepository.get_all()
+        
+        # Group permissions by role and resource type for better organization
+        grouped_permissions = []
+        role_resource_map = {}
+        
+        for perm in permissions:
+            role = perm["role"]
+            resource_type = perm["resource_type"]
+            
+            # Create key for role-resource combination
+            key = (role, resource_type)
+            
+            if key not in role_resource_map:
+                role_resource_map[key] = {
+                    "role": role,
+                    "resource_type": resource_type,
+                    "permissions": [],
+                    "created_at": perm["created_at"],
+                    "updated_at": perm["updated_at"]
+                }
+            
+            # Add permission to the list
+            role_resource_map[key]["permissions"].append(perm["permission"])
+        
+        # Convert to list and sort permissions within each group
+        for group in role_resource_map.values():
+            group["permissions"].sort()  # Sort permissions alphabetically
+            grouped_permissions.append(group)
+        
+        # Sort by role, then by resource type
+        grouped_permissions.sort(key=lambda x: (x["role"], x["resource_type"]))
+        
+        return JSONResponse({
+            "success": True,
+            "permissions": grouped_permissions,
+            "count": len(grouped_permissions),
+            "total_permissions": len(permissions),
+            "note": "Permissions are grouped by role and resource type for better readability"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting role permissions: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/role-permissions/{role}", tags=["Admin Role Permissions"])
+async def get_role_permissions_route(
+    role: str,
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Get permissions for a specific role (admin only).
+    Returns all permissions associated with the specified role in grouped format.
+    """
+    try:
+        from app.db.repositories import RolePermissionRepository
+        
+        if role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        permissions = await RolePermissionRepository.get_by_role(role)
+        
+        # Group permissions by resource type
+        grouped_permissions = []
+        resource_map = {}
+        
+        for perm in permissions:
+            resource_type = perm["resource_type"]
+            
+            if resource_type not in resource_map:
+                resource_map[resource_type] = {
+                    "role": role,
+                    "resource_type": resource_type,
+                    "permissions": [],
+                    "created_at": perm["created_at"],
+                    "updated_at": perm["updated_at"]
+                }
+            
+            resource_map[resource_type]["permissions"].append(perm["permission"])
+        
+        # Convert to list and sort permissions within each group
+        for group in resource_map.values():
+            group["permissions"].sort()  # Sort permissions alphabetically
+            grouped_permissions.append(group)
+        
+        # Sort by resource type
+        grouped_permissions.sort(key=lambda x: x["resource_type"])
+        
+        return JSONResponse({
+            "success": True,
+            "role": role,
+            "permissions": grouped_permissions,
+            "count": len(grouped_permissions),
+            "total_permissions": len(permissions),
+            "note": f"Permissions for {role} role grouped by resource type"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting permissions for role {role}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/role-permissions/{role}/{resource_type}", tags=["Admin Role Permissions"])
+async def get_role_resource_permissions_route(
+    role: str,
+    resource_type: str,
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Get permissions for a specific role and resource type (admin only).
+    Returns permissions for the specified role on the specified resource type.
+    """
+    try:
+        from app.db.repositories import RolePermissionRepository
+        
+        if role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        permissions = await RolePermissionRepository.get_by_role_and_resource(role, resource_type)
+        
+        # Extract permission names and sort them
+        permission_names = [perm["permission"] for perm in permissions]
+        permission_names.sort()
+        
+        return JSONResponse({
+            "success": True,
+            "role": role,
+            "resource_type": resource_type,
+            "permissions": permission_names,
+            "detailed_permissions": permissions,
+            "count": len(permissions),
+            "note": f"Permissions for {role} role on {resource_type} resource"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting permissions for role {role} on resource {resource_type}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/role-permissions", tags=["Admin Role Permissions"])
+async def add_role_permission_route(
+    permission_data: RolePermissionAdd,
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Add a permission to a role (admin only).
+    This allows admins to customize what each role can do.
+    
+    Note: Admin role permissions cannot be modified as they have all permissions by default.
+    """
+    try:
+        from app.db.repositories import RolePermissionRepository
+        
+        # Validate role
+        if permission_data.role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        # Validate permission
+        if permission_data.permission not in ["read", "write", "delete", "execute"]:
+            raise HTTPException(status_code=400, detail="Invalid permission. Must be read, write, delete, or execute")
+        
+        # Validate resource type
+        if permission_data.resource_type not in ["workflow", "user", "group", "system"]:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, user, group, or system")
+        
+        # Prevent modification of admin role permissions
+        if permission_data.role == "admin":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot modify admin role permissions. Admin role has all permissions by default."
+            )
+        
+        # Check if permission already exists
+        if await RolePermissionRepository.has_permission(
+            permission_data.role, 
+            permission_data.permission, 
+            permission_data.resource_type
+        ):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Permission {permission_data.permission} already exists for role {permission_data.role} on resource {permission_data.resource_type}"
+            )
+        
+        # Add the permission
+        success = await RolePermissionRepository.add_permission(
+            permission_data.role,
+            permission_data.permission,
+            permission_data.resource_type
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to add permission")
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Permission {permission_data.permission} added to role {permission_data.role} for resource {permission_data.resource_type}",
+            "permission": {
+                "role": permission_data.role,
+                "permission": permission_data.permission,
+                "resource_type": permission_data.resource_type
+            }
+        }, status_code=201)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding permission: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.delete("/role-permissions", tags=["Admin Role Permissions"])
+async def remove_role_permission_route(
+    permission_data: RolePermissionRemove,
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Remove a permission from a role (admin only).
+    This allows admins to restrict what each role can do.
+    
+    Note: Admin role permissions cannot be modified as they have all permissions by default.
+    """
+    try:
+        from app.db.repositories import RolePermissionRepository
+        
+        # Validate role
+        if permission_data.role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        # Validate permission
+        if permission_data.permission not in ["read", "write", "delete", "execute"]:
+            raise HTTPException(status_code=400, detail="Invalid permission. Must be read, write, delete, or execute")
+        
+        # Validate resource type
+        if permission_data.resource_type not in ["workflow", "user", "group", "system"]:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, user, group, or system")
+        
+        # Prevent modification of admin role permissions
+        if permission_data.role == "admin":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot modify admin role permissions. Admin role has all permissions by default."
+            )
+        
+        # Check if permission exists
+        if not await RolePermissionRepository.has_permission(
+            permission_data.role, 
+            permission_data.permission, 
+            permission_data.resource_type
+        ):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Permission {permission_data.permission} does not exist for role {permission_data.role} on resource {permission_data.resource_type}"
+            )
+        
+        # Remove the permission
+        success = await RolePermissionRepository.remove_permission(
+            permission_data.role,
+            permission_data.permission,
+            permission_data.resource_type
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to remove permission")
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Permission {permission_data.permission} removed from role {permission_data.role} for resource {permission_data.resource_type}",
+            "removed_permission": {
+                "role": permission_data.role,
+                "permission": permission_data.permission,
+                "resource_type": permission_data.resource_type
+            }
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing permission: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/role-permissions/reset/{role}", tags=["Admin Role Permissions"])
+async def reset_role_permissions_route(
+    role: str,
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Reset a role to its default permissions (admin only).
+    This removes all custom permissions and restores the default permissions for the role.
+    
+    Note: Admin role cannot be reset as it has all permissions by default.
+    """
+    try:
+        from app.db.repositories import RolePermissionRepository
+        
+        # Validate role
+        if role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        # Prevent reset of admin role
+        if role == "admin":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot reset admin role permissions. Admin role has all permissions by default."
+            )
+        
+        # Get current permissions for the role
+        current_permissions = await RolePermissionRepository.get_by_role(role)
+        
+        # Remove all current permissions
+        for perm in current_permissions:
+            await RolePermissionRepository.remove_permission(
+                perm["role"], 
+                perm["permission"], 
+                perm["resource_type"]
+            )
+        
+        # Re-add default permissions based on role
+        default_permissions = []
+        if role == "manager":
+            default_permissions = [
+                ("manager", "read", "workflow"),
+                ("manager", "write", "workflow"),
+                ("manager", "execute", "workflow"),
+                ("manager", "read", "user"),
+                ("manager", "read", "group"),
+                ("manager", "write", "group"),
+                ("manager", "read", "system"),
+            ]
+        elif role == "viewer":
+            default_permissions = [
+                ("viewer", "read", "workflow"),
+                ("viewer", "read", "user"),
+                ("viewer", "read", "group"),
+                ("viewer", "read", "system"),
+            ]
+        
+        # Add default permissions back
+        for role_name, permission, resource_type in default_permissions:
+            await RolePermissionRepository.add_permission(role_name, permission, resource_type)
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Role {role} permissions reset to defaults",
+            "role": role,
+            "default_permissions": default_permissions,
+            "removed_permissions_count": len(current_permissions),
+            "added_permissions_count": len(default_permissions)
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resetting role permissions for {role}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 

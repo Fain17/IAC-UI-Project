@@ -123,6 +123,19 @@ class DatabaseService:
                 )
             """)
             
+            # Create role permissions table for predefined roles
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS role_permissions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT NOT NULL,  -- admin, manager, viewer
+                    permission TEXT NOT NULL,  -- read, write, delete, execute
+                    resource_type TEXT NOT NULL,  -- workflow, user, group, system, etc.
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(role, permission, resource_type)
+                )
+            """)
+            
             # Create granular user permissions table
             await self.client.execute("""
                 CREATE TABLE IF NOT EXISTS user_permissions_granular (
@@ -186,7 +199,19 @@ class DatabaseService:
                 )
             """)
             
+            # Create workflow schedules table
+            # Note: This is now handled in _migrate_workflow_schedules_table()
+            
+            # Migrate workflow_schedules table if needed
+            await self._migrate_workflow_schedules_table()
+            
             logger.info("Database tables created successfully")
+            
+            # Initialize default role permissions
+            await self._initialize_default_role_permissions()
+            
+            # Ensure admin permissions are always maintained
+            await self._ensure_admin_permissions_always_exist()
             
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
@@ -453,6 +478,149 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error migrating users and groups tables: {e}")
             raise
+    
+    async def _migrate_workflow_schedules_table(self):
+        """Migrate workflow_schedules table to new schema with UUID support."""
+        try:
+            # Check if workflow_schedules table exists
+            result = await self.client.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='workflow_schedules'
+            """)
+            
+            if result.rows:
+                logger.info("Dropping existing workflow_schedules table to update schema with UUID support...")
+                await self.client.execute("DROP TABLE workflow_schedules")
+            
+            # Create new table with UUID support
+            await self.client.execute("""
+                CREATE TABLE workflow_schedules (
+                    id TEXT PRIMARY KEY,  -- UUID for schedule
+                    workflow_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    schedule_type TEXT NOT NULL, -- interval, daily, weekly, monthly
+                    schedule_value TEXT NOT NULL, -- e.g., "30m", "09:00", "monday:09:00", "15:09:00"
+                    description TEXT, -- optional description of the schedule
+                    is_active BOOLEAN DEFAULT TRUE, -- whether the schedule is active
+                    continue_on_failure BOOLEAN DEFAULT TRUE, -- continue execution on step failure
+                    last_execution TIMESTAMP, -- when the schedule last executed
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (workflow_id) REFERENCES workflows(id),
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            """)
+            
+            logger.info("Successfully created workflow_schedules table with UUID support")
+            
+        except Exception as e:
+            logger.error(f"Error migrating workflow_schedules table: {e}")
+            raise
+    
+    async def _initialize_default_role_permissions(self):
+        """Initialize default permissions for predefined roles."""
+        if not self.client:
+            return
+            
+        try:
+            # For a new feature, we'll just recreate the table to ensure correct structure
+            # Drop the table if it exists to ensure clean slate
+            await self.client.execute("DROP TABLE IF EXISTS role_permissions")
+            
+            # Create the table with correct structure
+            await self.client.execute("""
+                CREATE TABLE role_permissions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT NOT NULL,  -- admin, manager, viewer
+                    permission TEXT NOT NULL,  -- read, write, delete, execute
+                    resource_type TEXT NOT NULL,  -- workflow, user, group, system, etc.
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(role, permission, resource_type)
+                )
+            """)
+            
+            # Default permissions for Admin role (all permissions)
+            admin_permissions = [
+                ("admin", "read", "workflow"),
+                ("admin", "write", "workflow"),
+                ("admin", "delete", "workflow"),
+                ("admin", "execute", "workflow"),
+                ("admin", "read", "user"),
+                ("admin", "write", "user"),
+                ("admin", "delete", "user"),
+                ("admin", "execute", "user"),
+                ("admin", "read", "group"),
+                ("admin", "write", "group"),
+                ("admin", "delete", "group"),
+                ("admin", "execute", "group"),
+                ("admin", "read", "system"),
+                ("admin", "write", "system"),
+                ("admin", "delete", "system"),
+                ("admin", "execute", "system"),
+            ]
+            
+            # Default permissions for Manager role
+            manager_permissions = [
+                ("manager", "read", "workflow"),
+                ("manager", "write", "workflow"),
+                ("manager", "execute", "workflow"),
+                ("manager", "read", "user"),
+                ("manager", "read", "group"),
+                ("manager", "write", "group"),
+                ("manager", "read", "system"),
+            ]
+            
+            # Default permissions for Viewer role
+            viewer_permissions = [
+                ("viewer", "read", "workflow"),
+                ("viewer", "read", "user"),
+                ("viewer", "read", "group"),
+                ("viewer", "read", "system"),
+            ]
+            
+            # Insert all permissions
+            all_permissions = admin_permissions + manager_permissions + viewer_permissions
+            
+            for role, permission, resource_type in all_permissions:
+                await self.client.execute("""
+                    INSERT INTO role_permissions (role, permission, resource_type)
+                    VALUES (?, ?, ?)
+                """, [role, permission, resource_type])
+            
+            logger.info(f"Initialized {len(all_permissions)} default role permissions")
+            
+        except Exception as e:
+            logger.error(f"Error initializing default role permissions: {e}")
+            # Don't raise here as this is not critical for database operation
+    
+    async def _ensure_admin_permissions_always_exist(self):
+        """Ensures that the 'admin' role always has all permissions."""
+        if not self.client:
+            return
+            
+        try:
+            # Since we recreate the table every time in _initialize_default_role_permissions,
+            # this method is no longer needed for the basic functionality
+            # But we'll keep it as a safety check for any future manual modifications
+            result = await self.client.execute("""
+                SELECT COUNT(*) FROM role_permissions 
+                WHERE role = 'admin'
+            """)
+            
+            admin_permission_count = result.rows[0][0]
+            expected_admin_permissions = 16  # 4 permissions × 4 resource types
+            
+            if admin_permission_count < expected_admin_permissions:
+                logger.warning(f"Admin role has {admin_permission_count} permissions, expected {expected_admin_permissions}")
+                # Re-run initialization to fix any missing permissions
+                await self._initialize_default_role_permissions()
+            else:
+                logger.info(f"Admin role has all {admin_permission_count} expected permissions")
+            
+        except Exception as e:
+            logger.error(f"Error ensuring admin permissions: {e}")
+            # Don't raise here as this is not critical for database operation
     
     async def close(self):
         """Close database connection."""
