@@ -62,19 +62,86 @@ async def create_workflow_route(
 @router.get("/list", tags=["Workflow"])
 async def list_workflows(current_user: dict = Depends(get_current_user)):
     """
-    Get all workflows for the authenticated user.
-    Returns workflows owned by the user and workflows shared with teams the user is a member of.
+    Get all workflows for the authenticated user with detailed permission information.
+    Returns workflows owned by the user and workflows shared with teams the user is a member of,
+    including access levels and group information.
     """
     try:
+        from app.db.repositories import WorkflowRepository, WorkflowShareRepository, UserPermissionRepository, UserGroupRepository
+        
         # Get user's own workflows
         own_workflows = await get_user_workflows(current_user["id"])
         
+        # Get user's role and permissions
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
         # Get workflows from teams the user is a member of
-        from app.db.repositories import WorkflowRepository
         team_workflows = await WorkflowRepository.get_all_by_user_groups(current_user["id"])
         
+        # Get detailed sharing information for team workflows
+        enhanced_team_workflows = []
+        for workflow in team_workflows:
+            # Get groups this workflow is shared with
+            workflow_shares = await WorkflowShareRepository.get_by_workflow(workflow["id"])
+            
+            # Find the group the current user is a member of
+            user_group_share = None
+            for share in workflow_shares:
+                # Check if user is in this group
+                group_members = await UserGroupRepository.get_members(share["group_id"])
+                if any(member["user_id"] == current_user["id"] for member in group_members):
+                    user_group_share = share
+                    break
+            
+            if user_group_share:
+                # Get group information
+                group_info = await UserGroupRepository.get_by_id(user_group_share["group_id"])
+                
+                # Determine effective permissions based on user role and workflow share permission
+                effective_permissions = _calculate_effective_permissions(
+                    user_role, 
+                    user_group_share["permission"]
+                )
+                
+                enhanced_workflow = {
+                    **workflow,
+                    "access_type": "group_shared",
+                    "group_id": user_group_share["group_id"],
+                    "group_name": group_info.get("name", "Unknown Group") if group_info else "Unknown Group",
+                    "group_description": group_info.get("description") if group_info else None,
+                    "workflow_permission": user_group_share["permission"],
+                    "user_role": user_role,
+                    "effective_permissions": effective_permissions,
+                    "shared_at": user_group_share["created_at"],
+                    "last_updated": user_group_share["updated_at"]
+                }
+                enhanced_team_workflows.append(enhanced_workflow)
+        
+        # Enhance own workflows with owner permissions
+        enhanced_own_workflows = []
+        for workflow in own_workflows:
+            enhanced_workflow = {
+                **workflow,
+                "access_type": "owner",
+                "group_id": None,
+                "group_name": None,
+                "group_description": None,
+                "workflow_permission": "full",
+                "user_role": user_role,
+                "effective_permissions": {
+                    "read": True,
+                    "write": True,
+                    "delete": True,
+                    "execute": True
+                },
+                "shared_at": workflow.get("created_at"),
+                "last_updated": workflow.get("updated_at")
+            }
+            enhanced_own_workflows.append(enhanced_workflow)
+        
         # Combine and deduplicate workflows
-        all_workflows = own_workflows + team_workflows
+        all_workflows = enhanced_own_workflows + enhanced_team_workflows
         unique_workflows = {}
         
         for workflow in all_workflows:
@@ -82,19 +149,37 @@ async def list_workflows(current_user: dict = Depends(get_current_user)):
             if workflow_id not in unique_workflows:
                 unique_workflows[workflow_id] = workflow
             else:
-                # If workflow appears in both lists, keep the one with more recent updated_at
+                # If workflow appears in both lists, keep the owner version
                 existing = unique_workflows[workflow_id]
-                if workflow.get("updated_at", "") > existing.get("updated_at", ""):
-                    unique_workflows[workflow_id] = workflow
+                if existing["access_type"] == "owner":
+                    continue  # Keep owner version
+                elif workflow["access_type"] == "owner":
+                    unique_workflows[workflow_id] = workflow  # Replace with owner version
+                else:
+                    # If both are group shared, keep the one with more recent updated_at
+                    if workflow.get("last_updated", "") > existing.get("last_updated", ""):
+                        unique_workflows[workflow_id] = workflow
         
         workflows_list = list(unique_workflows.values())
+        
+        # Calculate permission summary
+        permission_summary = {
+            "total_workflows": len(workflows_list),
+            "owned_workflows": len([w for w in workflows_list if w["access_type"] == "owner"]),
+            "shared_workflows": len([w for w in workflows_list if w["access_type"] == "group_shared"]),
+            "user_role": user_role,
+            "can_create": user_role in ["admin", "manager"],
+            "can_delete": user_role in ["admin", "manager"],
+            "can_execute": user_role in ["admin", "manager", "viewer"]
+        }
         
         return JSONResponse({
             "success": True,
             "workflows": workflows_list,
+            "permission_summary": permission_summary,
             "count": len(workflows_list),
-            "own_count": len(own_workflows),
-            "team_count": len(team_workflows)
+            "own_count": len(enhanced_own_workflows),
+            "team_count": len(enhanced_team_workflows)
         })
     except Exception as e:
         logger.error(f"Error listing workflows: {e}")
@@ -977,4 +1062,142 @@ async def unshare_workflow_with_group(
         raise
     except Exception as e:
         logger.error(f"Error unsharing workflow {workflow_id} from group {group_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/{workflow_id}/permissions", tags=["Workflow"])
+async def get_workflow_permissions(
+    workflow_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get workflow permissions and group assignments.
+    Only workflow owners and members of groups the workflow is shared with can view this.
+    """
+    try:
+        from app.db.repositories import WorkflowRepository, WorkflowShareRepository, UserGroupRepository
+        
+        # First, check if user owns the workflow
+        workflow = await WorkflowRepository.get_by_id(workflow_id, current_user["id"])
+        is_owner = workflow is not None
+        
+        # If not owner, check if user has access through group sharing
+        if not is_owner:
+            from app.db.repositories import WorkflowShareRepository
+            access_permission = await WorkflowShareRepository.check_access(workflow_id, current_user["id"])
+            if not access_permission:
+                raise HTTPException(status_code=403, detail="Access denied. You must be the workflow owner or a member of a group this workflow is shared with.")
+        
+        # Get workflow details (either as owner or through admin method)
+        if is_owner:
+            workflow_info = workflow
+        else:
+            workflow_info = await WorkflowRepository.get_by_id_admin(workflow_id)
+            if not workflow_info:
+                raise HTTPException(status_code=404, detail="Workflow not found")
+        
+        # Get all groups this workflow is shared with
+        workflow_shares = await WorkflowShareRepository.get_by_workflow(workflow_id)
+        
+        # Enhance group information with names and descriptions
+        enhanced_shares = []
+        for share in workflow_shares:
+            group_info = await UserGroupRepository.get_by_id(share["group_id"])
+            if group_info:
+                enhanced_share = {
+                    "group_id": share["group_id"],
+                    "group_name": group_info.get("name", "Unknown Group"),
+                    "group_description": group_info.get("description"),
+                    "permission": share["permission"],
+                    "shared_at": share["created_at"],
+                    "last_updated": share["updated_at"]
+                }
+                enhanced_shares.append(enhanced_share)
+        
+        # Get user's role in each group (if they're a member)
+        user_group_roles = []
+        for share in enhanced_shares:
+            from app.db.repositories import UserPermissionRepository
+            user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+            if user_permission and user_permission.get("role"):
+                user_group_roles.append({
+                    "group_id": share["group_id"],
+                    "group_name": share["group_name"],
+                    "user_role": user_permission.get("role"),
+                    "workflow_permission": share["permission"]
+                })
+        
+        return JSONResponse({
+            "success": True,
+            "workflow": {
+                "id": workflow_info["id"],
+                "name": workflow_info["name"],
+                "description": workflow_info["description"],
+                "owner_id": workflow_info["user_id"],
+                "is_owner": is_owner
+            },
+            "shares": enhanced_shares,
+            "user_group_roles": user_group_roles,
+            "total_groups_shared": len(enhanced_shares),
+            "access_level": "owner" if is_owner else "group_member"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting workflow permissions for {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 
+
+def _calculate_effective_permissions(user_role: str, workflow_permission: str) -> Dict[str, bool]:
+    """
+    Calculate effective permissions based on user role and workflow share permission.
+    
+    Args:
+        user_role: User's role (admin, manager, viewer)
+        workflow_permission: Workflow share permission (read, write, execute)
+    
+    Returns:
+        Dictionary with effective permissions
+    """
+    # Base permissions for each role
+    role_permissions = {
+        "admin": {"read": True, "write": True, "delete": True, "execute": True},
+        "manager": {"read": True, "write": True, "delete": False, "execute": True},
+        "viewer": {"read": True, "write": False, "delete": False, "execute": True}
+    }
+    
+    # Get base permissions for user role
+    base_permissions = role_permissions.get(user_role, role_permissions["viewer"])
+    
+    # Apply workflow share permission restrictions
+    if workflow_permission == "read":
+        # Read-only access
+        return {
+            "read": base_permissions["read"],
+            "write": False,
+            "delete": False,
+            "execute": base_permissions["execute"]
+        }
+    elif workflow_permission == "write":
+        # Read and write access
+        return {
+            "read": base_permissions["read"],
+            "write": base_permissions["write"],
+            "delete": False,
+            "execute": base_permissions["execute"]
+        }
+    elif workflow_permission == "execute":
+        # Read and execute access
+        return {
+            "read": base_permissions["read"],
+            "write": False,
+            "delete": False,
+            "execute": base_permissions["execute"]
+        }
+    else:
+        # Default to read permissions
+        return {
+            "read": base_permissions["read"],
+            "write": False,
+            "delete": False,
+            "execute": base_permissions["execute"]
+        } 

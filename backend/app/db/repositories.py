@@ -1494,6 +1494,36 @@ class UserGroupRepository:
             return False
     
     @staticmethod
+    async def get_members(group_id: str) -> List[Dict]:
+        """Get all members of a user group."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT uga.user_id, uga.group_id, uga.created_at,
+                       u.username, u.email, u.is_active
+                FROM user_group_assignments uga
+                JOIN users u ON uga.user_id = u.id
+                WHERE uga.group_id = ?
+                ORDER BY u.username
+            """, [group_id])
+            
+            members = []
+            for row in result.rows:
+                members.append({
+                    "user_id": row[0],
+                    "group_id": row[1],
+                    "assigned_at": row[2],
+                    "username": row[3],
+                    "email": row[4],
+                    "is_active": bool(row[5])
+                })
+            return members
+        except Exception as e:
+            logger.error(f"Error getting members for group {group_id}: {e}")
+            return []
+    
+    @staticmethod
     async def delete(group_id: str) -> bool:
         """Delete a user group."""
         if not db_service.client:
