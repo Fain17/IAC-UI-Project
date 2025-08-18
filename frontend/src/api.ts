@@ -468,11 +468,18 @@ export const unshareWorkflowWithGroup = (workflowId: string, groupId: string): P
 
 // Get workflow permissions and sharing data
 export const getWorkflowPermissions = (workflowId: string): Promise<AxiosResponse<{
-  workflow_id: string;
-  workflow_name: string;
-  workflow_description?: string;
-  shared_groups: WorkflowGroupShare[];
-  user_permissions: WorkflowPermission[];
+  success: boolean;
+  workflow: {
+    id: string;
+    name: string;
+    description?: string;
+    owner_id: string;
+    is_owner: boolean;
+  };
+  shares: WorkflowGroupShare[];
+  user_group_roles: UserGroupRole[];
+  total_groups_shared: number;
+  access_level: string;
 }>> => API.get(`/workflow/${workflowId}/permissions`);
 
 // Get all workflows with their permissions (for bulk loading)
@@ -499,9 +506,16 @@ export interface WorkflowGroupShare {
   group_id: string;
   group_name: string;
   group_description?: string;
-  is_shared: boolean;
-  shared_at?: string;
-  member_count: number;
+  permission: string;
+  shared_at: string;
+  last_updated: string;
+}
+
+export interface UserGroupRole {
+  group_id: string;
+  group_name: string;
+  user_role: string;
+  workflow_permission: string;
 }
 
 export interface WorkflowAssignmentData {
@@ -509,7 +523,9 @@ export interface WorkflowAssignmentData {
   workflow_name: string;
   workflow_description?: string;
   shared_groups: WorkflowGroupShare[];
-  user_permissions: WorkflowPermission[];
+  user_group_roles: UserGroupRole[];
+  total_groups_shared: number;
+  access_level: string;
 } 
 
 // Workflow Management APIs
