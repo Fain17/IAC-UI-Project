@@ -4,6 +4,7 @@ from app.routes import home_router, settings_router, workflow_router, file_route
 from app.routes.admin_routes import router as admin_router
 from app.routes.websocket_routes import router as websocket_router
 from app.routes.workflow_automation_routes import router as workflow_automation_router
+from app.routes.config_routes import router as config_router
 from app.auth import auth_router
 from app.db.database import db_service
 from app.services.workflow_automation_service import workflow_automation_service
@@ -34,6 +35,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(websocket_router)
 app.include_router(workflow_automation_router)
+app.include_router(config_router)
 
 @app.on_event("startup")
 async def startup_event():
