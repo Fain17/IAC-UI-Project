@@ -649,6 +649,31 @@ const WorkflowDetailsPage: React.FC = () => {
               </div>
 
               <div className="form-group">
+                <label htmlFor="mappingGroup">Mapping Group (Optional)</label>
+                <select
+                  id="mappingGroup"
+                  value={newStep.parameters?.mapping_group || ''}
+                  onChange={(e) => setNewStep({
+                    ...newStep,
+                    parameters: {
+                      ...newStep.parameters,
+                      mapping_group: e.target.value || undefined
+                    }
+                  })}
+                >
+                  <option value="">No mapping group</option>
+                  <option value="ec2_to_lt">EC2 to Launch Template</option>
+                  <option value="ec2_to_ami">EC2 to AMI</option>
+                  <option value="lt_to_lt">Launch Template to Launch Template</option>
+                  <option value="ami_to_ami">AMI to AMI</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <small className="form-help">
+                  Select a mapping group to associate this step with specific resource mappings
+                </small>
+              </div>
+
+              <div className="form-group">
                 <label htmlFor="fileUploadMethod">File Upload Method</label>
                 <select
                   id="fileUploadMethod"
@@ -828,6 +853,31 @@ const WorkflowDetailsPage: React.FC = () => {
                   })}
                   placeholder="e.g., boto3, requests"
                 />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="editMappingGroup">Mapping Group (Optional)</label>
+                <select
+                  id="editMappingGroup"
+                  value={editStep.parameters?.mapping_group || ''}
+                  onChange={(e) => setEditStep({
+                    ...editStep,
+                    parameters: {
+                      ...editStep.parameters,
+                      mapping_group: e.target.value || undefined
+                    }
+                  })}
+                >
+                  <option value="">No mapping group</option>
+                  <option value="ec2_to_lt">EC2 to Launch Template</option>
+                  <option value="ec2_to_ami">EC2 to AMI</option>
+                  <option value="lt_to_lt">Launch Template to Launch Template</option>
+                  <option value="ami_to_ami">AMI to AMI</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <small className="form-help">
+                  Select a mapping group to associate this step with specific resource mappings
+                </small>
               </div>
 
               <div className="form-group">

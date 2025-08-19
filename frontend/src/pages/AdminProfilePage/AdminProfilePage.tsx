@@ -9,7 +9,7 @@ interface AdminInfo {
   username: string;
   email: string;
   isAdmin: boolean;
-  permission_level?: string;
+  role?: string;
 }
 
 const AdminProfilePage: React.FC = () => {
@@ -17,7 +17,7 @@ const AdminProfilePage: React.FC = () => {
     username: '',
     email: '',
     isAdmin: false,
-    permission_level: 'viewer'
+    role: 'viewer'
   });
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -47,6 +47,8 @@ const AdminProfilePage: React.FC = () => {
     }
   };
 
+
+
   useEffect(() => {
     const loadUserInfo = async () => {
       // Load admin info from TokenManager
@@ -56,7 +58,7 @@ const AdminProfilePage: React.FC = () => {
           username: user.username || '',
           email: user.email || '',
           isAdmin: user.isAdmin || false,
-          permission_level: 'viewer'
+          role: 'viewer'
         });
         setNewUsername(user.username || '');
 
@@ -66,13 +68,15 @@ const AdminProfilePage: React.FC = () => {
           if (permissions) {
             setAdminInfo(prev => ({
               ...prev,
-              permission_level: permissions.permission_level || 'viewer',
-              isAdmin: permissions.is_admin || prev.isAdmin
+              role: permissions.role || 'viewer',
+              isAdmin: permissions.role === 'admin' || prev.isAdmin
             }));
           }
         } catch (error) {
           console.error('Failed to fetch user permissions:', error);
         }
+
+
       }
     };
 
@@ -182,7 +186,7 @@ const AdminProfilePage: React.FC = () => {
       </button>
       <div className="admin-profile-container">
         <div className="admin-profile-header">
-          <h1>Admin Profile</h1>
+          <h1>User Profile</h1>
           <button onClick={handleLogout} className="logout-button">
             Logout
           </button>
@@ -217,19 +221,17 @@ const AdminProfilePage: React.FC = () => {
             </div>
             <div className="info-row">
               <strong>Role:</strong> <span style={{ 
-                background: adminInfo.isAdmin ? '#007bff' : 
-                           adminInfo.permission_level === 'manager' ? '#28a745' : '#6c757d', 
+                background: adminInfo.role === 'admin' ? '#007bff' : 
+                           adminInfo.role === 'manager' ? '#28a745' : '#6c757d', 
                 color: 'white', 
                 padding: '0.2rem 0.5rem', 
                 borderRadius: '3px', 
                 fontSize: '0.9em' 
               }}>
-                {adminInfo.isAdmin ? 'Admin' : 
-                 adminInfo.permission_level === 'manager' ? 'Manager' : 
-                 adminInfo.permission_level === 'viewer' ? 'Viewer' : 
-                 adminInfo.permission_level || 'User'}
+                {adminInfo.role ? adminInfo.role.charAt(0).toUpperCase() + adminInfo.role.slice(1) : 'User'}
               </span>
             </div>
+
           </div>
         </div>
 
