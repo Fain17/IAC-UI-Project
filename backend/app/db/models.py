@@ -246,3 +246,46 @@ class Workflow(WorkflowBase):
 
     class Config:
         from_attributes = True 
+
+# HashiCorp Vault Configuration Models
+class VaultEngineType(str, Enum):
+    KV = "kv"
+    AWS = "aws"
+    AZURE = "azure"
+    GOOGLE_CLOUD = "google_cloud"
+
+class VaultEngineVersion(str, Enum):
+    V1 = "1"
+    V2 = "2"
+
+class VaultConfigBase(BaseModel):
+    config_name: str
+    vault_address: str
+    vault_token: str
+    namespace: Optional[str] = None
+    mount_path: str
+    engine_type: VaultEngineType
+    engine_version: VaultEngineVersion
+    is_active: bool = True
+
+class VaultConfigCreate(VaultConfigBase):
+    pass
+
+class VaultConfigUpdate(BaseModel):
+    config_name: Optional[str] = None
+    vault_address: Optional[str] = None
+    vault_token: Optional[str] = None
+    namespace: Optional[str] = None
+    mount_path: Optional[str] = None
+    engine_type: Optional[VaultEngineType] = None
+    engine_version: Optional[VaultEngineVersion] = None
+    is_active: Optional[bool] = None
+
+class VaultConfig(VaultConfigBase):
+    id: int
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True 

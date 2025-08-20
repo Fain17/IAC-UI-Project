@@ -199,6 +199,61 @@ class DatabaseService:
                 )
             """)
             
+            # Create docker execution mappings table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS docker_mappings (
+                    id TEXT PRIMARY KEY,  -- UUID for mapping
+                    script_type TEXT NOT NULL,  -- python, nodejs, bash, etc.
+                    docker_image TEXT NOT NULL,  -- custom-python:3.9
+                    docker_tag TEXT DEFAULT 'latest',
+                    description TEXT,
+                    environment_variables TEXT,  -- JSON object
+                    volumes TEXT,  -- JSON array of volume mounts
+                    ports TEXT,  -- JSON array of port mappings
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_by TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (created_by) REFERENCES users (id)
+                )
+            """)
+            
+            # Create custom resource mappings table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS resource_mappings (
+                    id TEXT PRIMARY KEY,  -- UUID for mapping
+                    mapping_type TEXT NOT NULL,  -- ec2_to_lt, ec2_to_ami, etc.
+                    source_resource TEXT NOT NULL,  -- i-1234567890abcdef0
+                    target_resource TEXT NOT NULL,  -- lt-0987654321fedcba0
+                    description TEXT,
+                    metadata TEXT,  -- JSON object for additional data
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_by TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (created_by) REFERENCES users (id)
+                )
+            """)
+            
+            # Create HashiCorp Vault configurations table
+            await self.client.execute("""
+                CREATE TABLE IF NOT EXISTS vault_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    config_name TEXT UNIQUE NOT NULL,
+                    vault_address TEXT NOT NULL,
+                    vault_token TEXT NOT NULL,
+                    namespace TEXT,
+                    mount_path TEXT NOT NULL,
+                    engine_type TEXT NOT NULL,
+                    engine_version TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_by TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (created_by) REFERENCES users (id)
+                )
+            """)
+            
             # Create workflow schedules table
             # Note: This is now handled in _migrate_workflow_schedules_table()
             

@@ -1494,6 +1494,36 @@ class UserGroupRepository:
             return False
     
     @staticmethod
+    async def get_members(group_id: str) -> List[Dict]:
+        """Get all members of a user group."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute("""
+                SELECT uga.user_id, uga.group_id, uga.created_at,
+                       u.username, u.email, u.is_active
+                FROM user_group_assignments uga
+                JOIN users u ON uga.user_id = u.id
+                WHERE uga.group_id = ?
+                ORDER BY u.username
+            """, [group_id])
+            
+            members = []
+            for row in result.rows:
+                members.append({
+                    "user_id": row[0],
+                    "group_id": row[1],
+                    "assigned_at": row[2],
+                    "username": row[3],
+                    "email": row[4],
+                    "is_active": bool(row[5])
+                })
+            return members
+        except Exception as e:
+            logger.error(f"Error getting members for group {group_id}: {e}")
+            return []
+    
+    @staticmethod
     async def delete(group_id: str) -> bool:
         """Delete a user group."""
         if not db_service.client:
@@ -1900,3 +1930,544 @@ class WorkflowRepository:
         except Exception as e:
             logger.error(f"Error updating workflow: {e}")
             return False 
+
+
+class DockerMappingRepository:
+    """Repository for managing docker execution mappings."""
+    
+    @staticmethod
+    async def create(script_type: str, docker_image: str, docker_tag: str = "latest",
+                    description: str = None, environment_variables: Dict = None,
+                    volumes: List[str] = None, ports: List[str] = None,
+                    is_active: bool = True, created_by: str = None) -> Optional[str]:
+        """Create a new docker execution mapping."""
+        if not db_service.client:
+            return None
+        try:
+            import uuid
+            mapping_id = f"docker_mapping_{str(uuid.uuid4())}"
+            
+            result = await db_service.client.execute("""
+                INSERT INTO docker_mappings (
+                    id, script_type, docker_image, docker_tag, description,
+                    environment_variables, volumes, ports, is_active, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                mapping_id, script_type, docker_image, docker_tag, description,
+                json.dumps(environment_variables or {}),
+                json.dumps(volumes or []),
+                json.dumps(ports or []),
+                is_active, created_by
+            ])
+            
+            if result.rows_affected > 0:
+                logger.info(f"Created docker mapping: {script_type} -> {docker_image}:{docker_tag}")
+                return mapping_id
+            return None
+        except Exception as e:
+            logger.error(f"Error creating docker mapping: {e}")
+            return None
+    
+    @staticmethod
+    async def get_by_id(mapping_id: str) -> Optional[Dict]:
+        """Get docker mapping by ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute("""
+                SELECT id, script_type, docker_image, docker_tag, description,
+                       environment_variables, volumes, ports, is_active, created_by,
+                       created_at, updated_at
+                FROM docker_mappings WHERE id = ?
+            """, [mapping_id])
+            
+            if not result.rows:
+                return None
+            
+            row = result.rows[0]
+            return {
+                "id": row[0],
+                "script_type": row[1],
+                "docker_image": row[2],
+                "docker_tag": row[3],
+                "description": row[4],
+                "environment_variables": json.loads(row[5]) if row[5] else {},
+                "volumes": json.loads(row[6]) if row[6] else [],
+                "ports": json.loads(row[7]) if row[7] else [],
+                "is_active": bool(row[8]),
+                "created_by": row[9],
+                "created_at": row[10],
+                "updated_at": row[11]
+            }
+        except Exception as e:
+            logger.error(f"Error getting docker mapping by ID: {e}")
+            return None
+    
+    @staticmethod
+    async def get_all(script_type: str = None, is_active: bool = None) -> List[Dict]:
+        """Get all docker mappings with optional filtering."""
+        if not db_service.client:
+            return []
+        try:
+            query = "SELECT id, script_type, docker_image, docker_tag, description, environment_variables, volumes, ports, is_active, created_by, created_at, updated_at FROM docker_mappings"
+            params = []
+            
+            if script_type or is_active is not None:
+                query += " WHERE"
+                conditions = []
+                
+                if script_type:
+                    conditions.append("script_type = ?")
+                    params.append(script_type)
+                
+                if is_active is not None:
+                    conditions.append("is_active = ?")
+                    params.append(is_active)
+                
+                query += " " + " AND ".join(conditions)
+            
+            query += " ORDER BY script_type, created_at DESC"
+            
+            result = await db_service.client.execute(query, params)
+            
+            mappings = []
+            for row in result.rows:
+                mappings.append({
+                    "id": row[0],
+                    "script_type": row[1],
+                    "docker_image": row[2],
+                    "docker_tag": row[3],
+                    "description": row[4],
+                    "environment_variables": json.loads(row[5]) if row[5] else {},
+                    "volumes": json.loads(row[6]) if row[6] else [],
+                    "ports": json.loads(row[7]) if row[7] else [],
+                    "is_active": bool(row[8]),
+                    "created_by": row[9],
+                    "created_at": row[10],
+                    "updated_at": row[11]
+                })
+            
+            return mappings
+        except Exception as e:
+            logger.error(f"Error getting all docker mappings: {e}")
+            return []
+    
+    @staticmethod
+    async def update(mapping_id: str, **kwargs) -> bool:
+        """Update a docker mapping."""
+        if not db_service.client:
+            return False
+        try:
+            updates = []
+            params = []
+            
+            for key, value in kwargs.items():
+                if key in ["script_type", "docker_image", "docker_tag", "description", "is_active"]:
+                    updates.append(f"{key} = ?")
+                    params.append(value)
+                elif key in ["environment_variables", "volumes", "ports"]:
+                    updates.append(f"{key} = ?")
+                    params.append(json.dumps(value))
+            
+            if not updates:
+                return False
+            
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(mapping_id)
+            
+            query = f"UPDATE docker_mappings SET {', '.join(updates)} WHERE id = ?"
+            result = await db_service.client.execute(query, params)
+            
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating docker mapping: {e}")
+            return False
+    
+    @staticmethod
+    async def delete(mapping_id: str) -> bool:
+        """Delete a docker mapping."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM docker_mappings WHERE id = ?",
+                [mapping_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting docker mapping: {e}")
+            return False
+
+
+class ResourceMappingRepository:
+    """Repository for managing custom resource mappings."""
+    
+    @staticmethod
+    async def create(mapping_type: str, source_resource: str, target_resource: str,
+                    description: str = None, metadata: Dict = None,
+                    is_active: bool = True, created_by: str = None) -> Optional[str]:
+        """Create a new resource mapping."""
+        if not db_service.client:
+            return None
+        try:
+            import uuid
+            mapping_id = f"resource_mapping_{str(uuid.uuid4())}"
+            
+            result = await db_service.client.execute("""
+                INSERT INTO resource_mappings (
+                    id, mapping_type, source_resource, target_resource, description,
+                    metadata, is_active, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                mapping_id, mapping_type, source_resource, target_resource, description,
+                json.dumps(metadata or {}),
+                is_active, created_by
+            ])
+            
+            if result.rows_affected > 0:
+                logger.info(f"Created resource mapping: {mapping_type} -> {source_resource} -> {target_resource}")
+                return mapping_id
+            return None
+        except Exception as e:
+            logger.error(f"Error creating resource mapping: {e}")
+            return None
+    
+    @staticmethod
+    async def get_by_id(mapping_id: str) -> Optional[Dict]:
+        """Get resource mapping by ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute("""
+                SELECT id, mapping_type, source_resource, target_resource, description,
+                       metadata, is_active, created_by, created_at, updated_at
+                FROM resource_mappings WHERE id = ?
+            """, [mapping_id])
+            
+            if not result.rows:
+                return None
+            
+            row = result.rows[0]
+            return {
+                "id": row[0],
+                "mapping_type": row[1],
+                "source_resource": row[2],
+                "target_resource": row[3],
+                "description": row[4],
+                "metadata": json.loads(row[5]) if row[5] else {},
+                "is_active": bool(row[6]),
+                "created_by": row[7],
+                "created_at": row[8],
+                "updated_at": row[9]
+            }
+        except Exception as e:
+            logger.error(f"Error getting resource mapping by ID: {e}")
+            return None
+    
+    @staticmethod
+    async def get_all(mapping_type: str = None, source_resource: str = None, is_active: bool = None) -> List[Dict]:
+        """Get all resource mappings with optional filtering."""
+        if not db_service.client:
+            return []
+        try:
+            query = "SELECT id, mapping_type, source_resource, target_resource, description, metadata, is_active, created_by, created_at, updated_at FROM resource_mappings"
+            params = []
+            
+            if mapping_type or source_resource or is_active is not None:
+                query += " WHERE"
+                conditions = []
+                
+                if mapping_type:
+                    conditions.append("mapping_type = ?")
+                    params.append(mapping_type)
+                
+                if source_resource:
+                    conditions.append("source_resource = ?")
+                    params.append(source_resource)
+                
+                if is_active is not None:
+                    conditions.append("is_active = ?")
+                    params.append(is_active)
+                
+                query += " " + " AND ".join(conditions)
+            
+            query += " ORDER BY mapping_type, created_at DESC"
+            
+            result = await db_service.client.execute(query, params)
+            
+            mappings = []
+            for row in result.rows:
+                mappings.append({
+                    "id": row[0],
+                    "mapping_type": row[1],
+                    "source_resource": row[2],
+                    "target_resource": row[3],
+                    "description": row[4],
+                    "metadata": json.loads(row[5]) if row[5] else {},
+                    "is_active": bool(row[6]),
+                    "created_by": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9]
+                })
+            
+            return mappings
+        except Exception as e:
+            logger.error(f"Error getting all resource mappings: {e}")
+            return []
+    
+    @staticmethod
+    async def update(mapping_id: str, **kwargs) -> bool:
+        """Update a resource mapping."""
+        if not db_service.client:
+            return False
+        try:
+            updates = []
+            params = []
+            
+            for key, value in kwargs.items():
+                if key in ["mapping_type", "source_resource", "target_resource", "description", "is_active"]:
+                    updates.append(f"{key} = ?")
+                    params.append(value)
+                elif key == "metadata":
+                    updates.append("metadata = ?")
+                    params.append(json.dumps(value))
+            
+            if not updates:
+                return False
+            
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(mapping_id)
+            
+            query = f"UPDATE resource_mappings SET {', '.join(updates)} WHERE id = ?"
+            result = await db_service.client.execute(query, params)
+            
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating resource mapping: {e}")
+            return False
+    
+    @staticmethod
+    async def delete(mapping_id: str) -> bool:
+        """Delete a resource mapping."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM resource_mappings WHERE id = ?",
+                [mapping_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting resource mapping: {e}")
+            return False 
+
+class VaultConfigRepository:
+    """Repository for HashiCorp Vault configuration operations."""
+    
+    @staticmethod
+    async def create(
+        config_name: str,
+        vault_address: str,
+        vault_token: str,
+        mount_path: str,
+        engine_type: str,
+        engine_version: str,
+        created_by: str,
+        namespace: str = None,
+        is_active: bool = True
+    ) -> Optional[int]:
+        """Create a new vault configuration."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                """INSERT INTO vault_configs 
+                   (config_name, vault_address, vault_token, namespace, mount_path, 
+                    engine_type, engine_version, is_active, created_by) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [config_name, vault_address, vault_token, namespace, mount_path, 
+                 engine_type, engine_version, is_active, created_by]
+            )
+            return result.last_insert_id
+        except Exception as e:
+            logger.error(f"Error creating vault config: {e}")
+            return None
+    
+    @staticmethod
+    async def get_by_id(config_id: int) -> Optional[Dict]:
+        """Get vault configuration by ID."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                """SELECT id, config_name, vault_address, vault_token, namespace, 
+                          mount_path, engine_type, engine_version, is_active, 
+                          created_by, created_at, updated_at 
+                   FROM vault_configs WHERE id = ?""",
+                [config_id]
+            )
+            
+            if result.rows:
+                row = result.rows[0]
+                return {
+                    "id": row[0],
+                    "config_name": row[1],
+                    "vault_address": row[2],
+                    "vault_token": row[3],
+                    "namespace": row[4],
+                    "mount_path": row[5],
+                    "engine_type": row[6],
+                    "engine_version": row[7],
+                    "is_active": bool(row[8]),
+                    "created_by": row[9],
+                    "created_at": row[10],
+                    "updated_at": row[11]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error getting vault config by ID: {e}")
+            return None
+    
+    @staticmethod
+    async def get_by_name(config_name: str) -> Optional[Dict]:
+        """Get vault configuration by name."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute(
+                """SELECT id, config_name, vault_address, vault_token, namespace, 
+                          mount_path, engine_type, engine_version, is_active, 
+                          created_by, created_at, updated_at 
+                   FROM vault_configs WHERE config_name = ?""",
+                [config_name]
+            )
+            
+            if result.rows:
+                row = result.rows[0]
+                return {
+                    "id": row[0],
+                    "config_name": row[1],
+                    "vault_address": row[2],
+                    "vault_token": row[3],
+                    "namespace": row[4],
+                    "mount_path": row[5],
+                    "engine_type": row[6],
+                    "engine_version": row[7],
+                    "is_active": bool(row[8]),
+                    "created_by": row[9],
+                    "created_at": row[10],
+                    "updated_at": row[11]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error getting vault config by name: {e}")
+            return None
+    
+    @staticmethod
+    async def get_all(
+        engine_type: str = None,
+        is_active: bool = None,
+        created_by: str = None
+    ) -> List[Dict]:
+        """Get all vault configurations with optional filtering."""
+        if not db_service.client:
+            return []
+        try:
+            query = """SELECT id, config_name, vault_address, vault_token, namespace, 
+                              mount_path, engine_type, engine_version, is_active, 
+                              created_by, created_at, updated_at 
+                       FROM vault_configs"""
+            params = []
+            
+            if engine_type or is_active is not None or created_by:
+                query += " WHERE"
+                conditions = []
+                
+                if engine_type:
+                    conditions.append("engine_type = ?")
+                    params.append(engine_type)
+                
+                if is_active is not None:
+                    conditions.append("is_active = ?")
+                    params.append(is_active)
+                
+                if created_by:
+                    conditions.append("created_by = ?")
+                    params.append(created_by)
+                
+                query += " " + " AND ".join(conditions)
+            
+            query += " ORDER BY config_name, created_at DESC"
+            
+            result = await db_service.client.execute(query, params)
+            
+            configs = []
+            for row in result.rows:
+                configs.append({
+                    "id": row[0],
+                    "config_name": row[1],
+                    "vault_address": row[2],
+                    "vault_token": row[3],
+                    "namespace": row[4],
+                    "mount_path": row[5],
+                    "engine_type": row[6],
+                    "engine_version": row[7],
+                    "is_active": bool(row[8]),
+                    "created_by": row[9],
+                    "created_at": row[10],
+                    "updated_at": row[11]
+                })
+            
+            return configs
+        except Exception as e:
+            logger.error(f"Error getting all vault configs: {e}")
+            return []
+    
+    @staticmethod
+    async def update(config_id: int, **kwargs) -> bool:
+        """Update a vault configuration."""
+        if not db_service.client:
+            return False
+        try:
+            updates = []
+            params = []
+            
+            for key, value in kwargs.items():
+                if key in ["config_name", "vault_address", "vault_token", "namespace", 
+                          "mount_path", "engine_type", "engine_version", "is_active"]:
+                    updates.append(f"{key} = ?")
+                    params.append(value)
+            
+            if not updates:
+                return False
+            
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(config_id)
+            
+            query = f"UPDATE vault_configs SET {', '.join(updates)} WHERE id = ?"
+            result = await db_service.client.execute(query, params)
+            
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error updating vault config: {e}")
+            return False
+    
+    @staticmethod
+    async def delete(config_id: int) -> bool:
+        """Delete a vault configuration."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM vault_configs WHERE id = ?",
+                [config_id]
+            )
+            return result.rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error deleting vault config: {e}")
+            return False
+    
+    @staticmethod
+    async def get_active_configs() -> List[Dict]:
+        """Get all active vault configurations."""
+        return await VaultConfigRepository.get_all(is_active=True)

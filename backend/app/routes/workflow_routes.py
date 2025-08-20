@@ -32,6 +32,17 @@ async def create_workflow_route(
     Note: Steps are not included in the initial creation and will be an empty list.
     """
     try:
+        # Check user permission to create workflows
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "create"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can create workflows."
+            )
+        
         if not workflow_data.name or not workflow_data.name.strip():
             raise HTTPException(status_code=400, detail="Workflow name is required")
         
@@ -62,19 +73,122 @@ async def create_workflow_route(
 @router.get("/list", tags=["Workflow"])
 async def list_workflows(current_user: dict = Depends(get_current_user)):
     """
-    Get all workflows for the authenticated user.
-    Returns workflows owned by the user and workflows shared with teams the user is a member of.
+    Get all workflows for the authenticated user with detailed permission information.
+    Returns workflows owned by the user and workflows shared with teams the user is a member of,
+    including access levels and group information.
     """
     try:
+        from app.db.repositories import WorkflowRepository, WorkflowShareRepository, UserPermissionRepository, UserGroupRepository
+        
         # Get user's own workflows
         own_workflows = await get_user_workflows(current_user["id"])
         
+        # Get user's role and permissions
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
         # Get workflows from teams the user is a member of
-        from app.db.repositories import WorkflowRepository
         team_workflows = await WorkflowRepository.get_all_by_user_groups(current_user["id"])
         
+        # Get detailed sharing information for team workflows
+        enhanced_team_workflows = []
+        for workflow in team_workflows:
+            # Get groups this workflow is shared with
+            workflow_shares = await WorkflowShareRepository.get_by_workflow(workflow["id"])
+            
+            # Find the group the current user is a member of
+            user_group_share = None
+            user_group_info = None
+            for share in workflow_shares:
+                # Check if user is in this group
+                group_members = await UserGroupRepository.get_members(share["group_id"])
+                if any(member["user_id"] == current_user["id"] for member in group_members):
+                    user_group_share = share
+                    user_group_info = await UserGroupRepository.get_by_id(share["group_id"])
+                    break
+            
+            if user_group_share:
+                # Enhance all groups this workflow is shared with
+                enhanced_shares = []
+                for share in workflow_shares:
+                    group_info = await UserGroupRepository.get_by_id(share["group_id"])
+                    if group_info:
+                        enhanced_share = {
+                            "group_id": share["group_id"],
+                            "group_name": group_info.get("name", "Unknown Group"),
+                            "group_description": group_info.get("description"),
+                            "permission": share["permission"],
+                            "shared_at": share["created_at"],
+                            "last_updated": share["updated_at"],
+                            "is_user_member": share["group_id"] == user_group_share["group_id"]
+                        }
+                        enhanced_shares.append(enhanced_share)
+                
+                # Determine effective permissions based on user role and workflow share permission
+                effective_permissions = _calculate_effective_permissions(
+                    user_role, 
+                    user_group_share["permission"]
+                )
+                
+                enhanced_workflow = {
+                    **workflow,
+                    "access_type": "group_shared",
+                    "workflow_permission": user_group_share["permission"],
+                    "user_role": user_role,
+                    "effective_permissions": effective_permissions,
+                    "shared_at": user_group_share["created_at"],
+                    "last_updated": user_group_share["updated_at"],
+                    "shared_groups": enhanced_shares,
+                    "total_groups_shared": len(enhanced_shares),
+                    "user_group_access": {
+                        "group_id": user_group_share["group_id"],
+                        "group_name": user_group_info.get("name", "Unknown Group") if user_group_info else "Unknown Group",
+                        "permission": user_group_share["permission"]
+                    }
+                }
+                enhanced_team_workflows.append(enhanced_workflow)
+        
+        # Enhance own workflows with owner permissions and show all groups they're shared with
+        enhanced_own_workflows = []
+        for workflow in own_workflows:
+            # Get all groups this workflow is shared with
+            workflow_shares = await WorkflowShareRepository.get_by_workflow(workflow["id"])
+            
+            # Enhance group information with names and descriptions
+            enhanced_shares = []
+            for share in workflow_shares:
+                group_info = await UserGroupRepository.get_by_id(share["group_id"])
+                if group_info:
+                    enhanced_share = {
+                        "group_id": share["group_id"],
+                        "group_name": group_info.get("name", "Unknown Group"),
+                        "group_description": group_info.get("description"),
+                        "permission": share["permission"],
+                        "shared_at": share["created_at"],
+                        "last_updated": share["updated_at"]
+                    }
+                    enhanced_shares.append(enhanced_share)
+            
+            enhanced_workflow = {
+                **workflow,
+                "access_type": "owner",
+                "workflow_permission": "full",
+                "user_role": user_role,
+                "effective_permissions": {
+                    "read": True,
+                    "write": True,
+                    "delete": True,
+                    "execute": True
+                },
+                "shared_at": workflow.get("created_at"),
+                "last_updated": workflow.get("updated_at"),
+                "shared_groups": enhanced_shares,
+                "total_groups_shared": len(enhanced_shares)
+            }
+            enhanced_own_workflows.append(enhanced_workflow)
+        
         # Combine and deduplicate workflows
-        all_workflows = own_workflows + team_workflows
+        all_workflows = enhanced_own_workflows + enhanced_team_workflows
         unique_workflows = {}
         
         for workflow in all_workflows:
@@ -82,19 +196,39 @@ async def list_workflows(current_user: dict = Depends(get_current_user)):
             if workflow_id not in unique_workflows:
                 unique_workflows[workflow_id] = workflow
             else:
-                # If workflow appears in both lists, keep the one with more recent updated_at
+                # If workflow appears in both lists, keep the owner version
                 existing = unique_workflows[workflow_id]
-                if workflow.get("updated_at", "") > existing.get("updated_at", ""):
-                    unique_workflows[workflow_id] = workflow
+                if existing["access_type"] == "owner":
+                    continue  # Keep owner version
+                elif workflow["access_type"] == "owner":
+                    unique_workflows[workflow_id] = workflow  # Replace with owner version
+                else:
+                    # If both are group shared, keep the one with more recent updated_at
+                    if workflow.get("last_updated", "") > existing.get("last_updated", ""):
+                        unique_workflows[workflow_id] = workflow
         
         workflows_list = list(unique_workflows.values())
+        
+        # Calculate permission summary
+        total_groups_shared = sum(w.get("total_groups_shared", 0) for w in workflows_list)
+        permission_summary = {
+            "total_workflows": len(workflows_list),
+            "owned_workflows": len([w for w in workflows_list if w["access_type"] == "owner"]),
+            "shared_workflows": len([w for w in workflows_list if w["access_type"] == "group_shared"]),
+            "total_groups_shared": total_groups_shared,
+            "user_role": user_role,
+            "can_create": user_role in ["admin", "manager"],
+            "can_delete": user_role in ["admin", "manager"],
+            "can_execute": user_role in ["admin", "manager", "viewer"]
+        }
         
         return JSONResponse({
             "success": True,
             "workflows": workflows_list,
+            "permission_summary": permission_summary,
             "count": len(workflows_list),
-            "own_count": len(own_workflows),
-            "team_count": len(team_workflows)
+            "own_count": len(enhanced_own_workflows),
+            "team_count": len(enhanced_team_workflows)
         })
     except Exception as e:
         logger.error(f"Error listing workflows: {e}")
@@ -142,6 +276,17 @@ async def delete_workflow_route(
     Only allows deletion of workflows owned by the authenticated user.
     """
     try:
+        # Check user permission to delete workflows
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "delete"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can delete workflows."
+            )
+        
         # Only owners can delete workflows (not team members)
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         if not workflow:
@@ -170,6 +315,17 @@ async def update_workflow_route(
     Only allows updates to workflows owned by the authenticated user.
     """
     try:
+        # Check user permission to update workflows
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "write"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can update workflows."
+            )
+        
         # Only owners can update workflows (not team members)
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         if not workflow:
@@ -234,6 +390,17 @@ async def append_step_route(
     A step directory will be created under the workflow directory for this step.
     """
     try:
+        # Check user permission to modify workflow steps
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "write"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can modify workflow steps."
+            )
+        
         # Check if user has access to the workflow (owner or team member)
         from app.services.workflow_service import check_workflow_access
         workflow = await check_workflow_access(workflow_id, current_user["id"])
@@ -332,6 +499,17 @@ async def delete_step_route(
     The step directory will also be deleted.
     """
     try:
+        # Check user permission to modify workflow steps
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "write"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can modify workflow steps."
+            )
+        
         # Get the current workflow
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         if not workflow:
@@ -420,6 +598,17 @@ async def reorder_steps_route(
     For individual step updates, use the /{step_order} endpoint instead.
     """
     try:
+        # Check user permission to modify workflow steps
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "write"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can modify workflow steps."
+            )
+        
         # Get the current workflow
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         if not workflow:
@@ -502,6 +691,17 @@ async def update_step_route(
     For bulk reordering of multiple steps, use the /reorder endpoint instead.
     """
     try:
+        # Check user permission to modify workflow steps
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "write"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can modify workflow steps."
+            )
+        
         # Get the current workflow
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         if not workflow:
@@ -574,7 +774,29 @@ async def list_steps_route(
     Get all steps for a specific workflow.
     """
     try:
+        # Check user permission to view workflow steps
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        logger.info(f"User {current_user['id']} has role: {user_role}")
+        
+        if not _check_user_permission(user_role, "read"):
+            logger.warning(f"User {current_user['id']} with role {user_role} denied access to view workflow steps")
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins, managers, and viewers can view workflow steps."
+            )
+        
+        # First try to get workflow as owner
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
+        
+        # If not found as owner, check if accessible through team membership
+        if not workflow:
+            from app.db.repositories import WorkflowRepository
+            team_workflows = await WorkflowRepository.get_all_by_user_groups(current_user["id"])
+            workflow = next((w for w in team_workflows if w["id"] == workflow_id), None)
+        
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found or access denied")
         
@@ -615,6 +837,17 @@ async def update_step_by_id_route(
     For bulk reordering of multiple steps, use the /reorder endpoint instead.
     """
     try:
+        # Check user permission to modify workflow steps
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "write"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can modify workflow steps."
+            )
+        
         # Get the current workflow
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         if not workflow:
@@ -692,6 +925,17 @@ async def execute_workflow_route(
     - Persists per-step last execution metadata back into the workflow's steps.
     """
     try:
+        # Check user permission to execute workflows
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "execute"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins, managers, and viewers can execute workflows."
+            )
+        
         started_at = datetime.now()
         overall_status = "init"
         steps_results: List[Dict[str, Any]] = []
@@ -930,6 +1174,17 @@ async def share_workflow_with_group(
     Share a workflow with a group (owner only). Permissions: read|write|execute (reserved for future use).
     """
     try:
+        # Check user permission to share workflows
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "assign"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can share workflows with groups."
+            )
+        
         # Ensure workflow exists and belongs to current user
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         if not workflow:
@@ -960,6 +1215,17 @@ async def unshare_workflow_with_group(
     Remove a workflow's share with a group (owner only).
     """
     try:
+        # Check user permission to manage workflow sharing
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "assign"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins and managers can manage workflow sharing."
+            )
+        
         # Ensure workflow exists and belongs to current user
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         if not workflow:
@@ -977,4 +1243,295 @@ async def unshare_workflow_with_group(
         raise
     except Exception as e:
         logger.error(f"Error unsharing workflow {workflow_id} from group {group_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/{workflow_id}/permissions", tags=["Workflow"])
+async def get_workflow_permissions(
+    workflow_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get workflow permissions and group assignments.
+    Only workflow owners and members of groups the workflow is shared with can view this.
+    """
+    try:
+        from app.db.repositories import WorkflowRepository, WorkflowShareRepository, UserGroupRepository, UserPermissionRepository
+        
+        # Check user permission to view workflow permissions
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        if not _check_user_permission(user_role, "read"):
+            raise HTTPException(
+                status_code=403, 
+                detail="Insufficient permissions. Only admins, managers, and viewers can view workflow permissions."
+            )
+        
+        # First, check if user owns the workflow
+        workflow = await WorkflowRepository.get_by_id(workflow_id, current_user["id"])
+        is_owner = workflow is not None
+        
+        # If not owner, check if user has access through group sharing
+        if not is_owner:
+            from app.db.repositories import WorkflowShareRepository
+            access_permission = await WorkflowShareRepository.check_access(workflow_id, current_user["id"])
+            if not access_permission:
+                raise HTTPException(status_code=403, detail="Access denied. You must be the workflow owner or a member of a group this workflow is shared with.")
+        
+        # Get workflow details (either as owner or through admin method)
+        if is_owner:
+            workflow_info = workflow
+        else:
+            workflow_info = await WorkflowRepository.get_by_id_admin(workflow_id)
+            if not workflow_info:
+                raise HTTPException(status_code=404, detail="Workflow not found")
+        
+        # Get all groups this workflow is shared with
+        workflow_shares = await WorkflowShareRepository.get_by_workflow(workflow_id)
+        
+        # Enhance group information with names and descriptions
+        enhanced_shares = []
+        for share in workflow_shares:
+            group_info = await UserGroupRepository.get_by_id(share["group_id"])
+            if group_info:
+                enhanced_share = {
+                    "group_id": share["group_id"],
+                    "group_name": group_info.get("name", "Unknown Group"),
+                    "group_description": group_info.get("description"),
+                    "permission": share["permission"],
+                    "shared_at": share["created_at"],
+                    "last_updated": share["updated_at"]
+                }
+                enhanced_shares.append(enhanced_share)
+        
+        # Get user's role in each group (if they're a member)
+        user_group_roles = []
+        for share in enhanced_shares:
+            from app.db.repositories import UserPermissionRepository
+            user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+            if user_permission and user_permission.get("role"):
+                user_group_roles.append({
+                    "group_id": share["group_id"],
+                    "group_name": share["group_name"],
+                    "user_role": user_permission.get("role"),
+                    "workflow_permission": share["permission"]
+                })
+        
+        return JSONResponse({
+            "success": True,
+            "workflow": {
+                "id": workflow_info["id"],
+                "name": workflow_info["name"],
+                "description": workflow_info["description"],
+                "owner_id": workflow_info["user_id"],
+                "is_owner": is_owner
+            },
+            "shares": enhanced_shares,
+            "user_group_roles": user_group_roles,
+            "total_groups_shared": len(enhanced_shares),
+            "access_level": "owner" if is_owner else "group_member"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting workflow permissions for {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 
+
+@router.get("/debug/user-role", tags=["Debug"])
+async def debug_user_role(current_user: dict = Depends(get_current_user)):
+    """
+    Debug endpoint to check user's current role and permissions.
+    """
+    try:
+        from app.db.repositories import UserPermissionRepository
+        
+        # Get user's role and permissions
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        # Test permission checks
+        permissions = {
+            "create": _check_user_permission(user_role, "create"),
+            "read": _check_user_permission(user_role, "read"),
+            "write": _check_user_permission(user_role, "write"),
+            "delete": _check_user_permission(user_role, "delete"),
+            "execute": _check_user_permission(user_role, "execute"),
+            "assign": _check_user_permission(user_role, "assign")
+        }
+        
+        return JSONResponse({
+            "success": True,
+            "user_id": current_user["id"],
+            "user_role": user_role,
+            "permissions": permissions,
+            "raw_permission_data": user_permission
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        })
+
+@router.get("/debug/workflow-access/{workflow_id}", tags=["Debug"])
+async def debug_workflow_access(
+    workflow_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Debug endpoint to check user's access to a specific workflow.
+    """
+    try:
+        from app.db.repositories import UserPermissionRepository, WorkflowRepository
+        
+        # Get user's role and permissions
+        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        # Check ownership
+        workflow_owner = await get_workflow_by_id(workflow_id, current_user["id"])
+        is_owner = workflow_owner is not None
+        
+        # Check team access
+        team_workflows = await WorkflowRepository.get_all_by_user_groups(current_user["id"])
+        has_team_access = any(w["id"] == workflow_id for w in team_workflows)
+        
+        # Check permissions
+        can_read = _check_user_permission(user_role, "read")
+        
+        return JSONResponse({
+            "success": True,
+            "user_id": current_user["id"],
+            "user_role": user_role,
+            "workflow_id": workflow_id,
+            "permissions": {
+                "can_read": can_read,
+                "is_owner": is_owner,
+                "has_team_access": has_team_access
+            },
+            "team_workflows_count": len(team_workflows),
+            "team_workflow_ids": [w["id"] for w in team_workflows],
+            "raw_permission_data": user_permission
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in workflow access debug endpoint: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        })
+
+def _check_user_permission(user_role: str, required_permission: str) -> bool:
+    """
+    Check if a user has the required permission based on their role.
+    
+    Args:
+        user_role: User's role (admin, manager, viewer)
+        required_permission: Required permission (create, read, write, delete, execute, assign)
+    
+    Returns:
+        True if user has permission, False otherwise
+    """
+    # Admin has all permissions
+    if user_role == "admin":
+        return True
+    
+    # Manager permissions
+    if user_role == "manager":
+        manager_permissions = ["list", "create", "read", "write", "execute", "assign", "delete"]
+        return required_permission in manager_permissions
+    
+    # Viewer permissions
+    if user_role == "viewer":
+        viewer_permissions = ["read", "execute"]
+        return required_permission in viewer_permissions
+    
+    # Default to no permissions
+    return False
+
+def _check_workflow_access_permission(user_role: str, workflow_permission: str, required_permission: str) -> bool:
+    """
+    Check if a user has the required permission for a specific workflow based on their role and workflow share permission.
+    
+    Args:
+        user_role: User's role (admin, manager, viewer)
+        workflow_permission: Workflow share permission (read, write, execute)
+        required_permission: Required permission (read, write, delete, execute)
+    
+    Returns:
+        True if user has permission, False otherwise
+    """
+    # Admin has all permissions regardless of workflow share permission
+    if user_role == "admin":
+        return True
+    
+    # Check workflow share permission restrictions
+    if workflow_permission == "read":
+        # Read-only access
+        return required_permission in ["read", "execute"]
+    elif workflow_permission == "write":
+        # Read and write access
+        return required_permission in ["read", "write", "execute"]
+    elif workflow_permission == "execute":
+        # Read and execute access
+        return required_permission in ["read", "execute"]
+    else:
+        # Default to read permissions
+        return required_permission in ["read", "execute"]
+
+def _calculate_effective_permissions(user_role: str, workflow_permission: str) -> Dict[str, bool]:
+    """
+    Calculate effective permissions based on user role and workflow share permission.
+    
+    Args:
+        user_role: User's role (admin, manager, viewer)
+        workflow_permission: Workflow share permission (read, write, execute)
+    
+    Returns:
+        Dictionary with effective permissions
+    """
+    # Base permissions for each role
+    role_permissions = {
+        "admin": {"read": True, "write": True, "delete": True, "execute": True},
+        "manager": {"read": True, "write": True, "delete": False, "execute": True},
+        "viewer": {"read": True, "write": False, "delete": False, "execute": True}
+    }
+    
+    # Get base permissions for user role
+    base_permissions = role_permissions.get(user_role, role_permissions["viewer"])
+    
+    # Apply workflow share permission restrictions
+    if workflow_permission == "read":
+        # Read-only access
+        return {
+            "read": base_permissions["read"],
+            "write": False,
+            "delete": False,
+            "execute": base_permissions["execute"]
+        }
+    elif workflow_permission == "write":
+        # Read and write access
+        return {
+            "read": base_permissions["read"],
+            "write": base_permissions["write"],
+            "delete": False,
+            "execute": base_permissions["execute"]
+        }
+    elif workflow_permission == "execute":
+        # Read and execute access
+        return {
+            "read": base_permissions["read"],
+            "write": False,
+            "delete": False,
+            "execute": base_permissions["execute"]
+        }
+    else:
+        # Default to read permissions
+        return {
+            "read": base_permissions["read"],
+            "write": False,
+            "delete": False,
+            "execute": base_permissions["execute"]
+        } 

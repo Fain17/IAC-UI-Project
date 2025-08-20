@@ -134,10 +134,13 @@ export const updateUserActiveStatus = (userId: string, isActive: boolean): Promi
 export const getUserPermissions = (userId: string): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> =>
   API.get(`/admin/users/${userId}/permissions`);
 
-export const getCurrentUserPermissions = (): Promise<AxiosResponse<{ permission_level: string; is_active: boolean; is_admin: boolean }>> => 
-  API.get('/settings/permissions');
-
-export const getAllUsersPermissions = (): Promise<AxiosResponse<{ users: Array<{ id: number; username: string; email: string; permission_level: string; is_active: boolean; is_admin: boolean }> }>> => 
+export const getCurrentUserPermissions = (): Promise<AxiosResponse<{ 
+  id: number;
+  user_id: string;
+  role: string;
+  created_at: string;
+  updated_at: string;
+}>> => 
   API.get('/settings/permissions');
 
 export const getAllUsersPermissionsNew = (): Promise<AxiosResponse<{ 
@@ -468,11 +471,18 @@ export const unshareWorkflowWithGroup = (workflowId: string, groupId: string): P
 
 // Get workflow permissions and sharing data
 export const getWorkflowPermissions = (workflowId: string): Promise<AxiosResponse<{
-  workflow_id: string;
-  workflow_name: string;
-  workflow_description?: string;
-  shared_groups: WorkflowGroupShare[];
-  user_permissions: WorkflowPermission[];
+  success: boolean;
+  workflow: {
+    id: string;
+    name: string;
+    description?: string;
+    owner_id: string;
+    is_owner: boolean;
+  };
+  shares: WorkflowGroupShare[];
+  user_group_roles: UserGroupRole[];
+  total_groups_shared: number;
+  access_level: string;
 }>> => API.get(`/workflow/${workflowId}/permissions`);
 
 // Get all workflows with their permissions (for bulk loading)
@@ -499,9 +509,16 @@ export interface WorkflowGroupShare {
   group_id: string;
   group_name: string;
   group_description?: string;
-  is_shared: boolean;
-  shared_at?: string;
-  member_count: number;
+  permission: string;
+  shared_at: string;
+  last_updated: string;
+}
+
+export interface UserGroupRole {
+  group_id: string;
+  group_name: string;
+  user_role: string;
+  workflow_permission: string;
 }
 
 export interface WorkflowAssignmentData {
@@ -509,7 +526,9 @@ export interface WorkflowAssignmentData {
   workflow_name: string;
   workflow_description?: string;
   shared_groups: WorkflowGroupShare[];
-  user_permissions: WorkflowPermission[];
+  user_group_roles: UserGroupRole[];
+  total_groups_shared: number;
+  access_level: string;
 } 
 
 // Workflow Management APIs
@@ -522,12 +541,37 @@ export interface Workflow {
   created_at: string;
   updated_at: string;
   steps: any[];
+  access_type?: string;
+  workflow_permission?: string;
+  user_role?: string;
+  effective_permissions?: {
+    read: boolean;
+    write: boolean;
+    delete: boolean;
+    execute: boolean;
+  };
+  shared_at?: string;
+  last_updated?: string;
+  shared_groups?: WorkflowGroupShare[];
+  total_groups_shared?: number;
 }
 
 export interface WorkflowListResponse {
   success: boolean;
   workflows: Workflow[];
   count: number;
+  permission_summary: {
+    total_workflows: number;
+    owned_workflows: number;
+    shared_workflows: number;
+    total_groups_shared: number;
+    user_role: string;
+    can_create: boolean;
+    can_delete: boolean;
+    can_execute: boolean;
+  };
+  own_count: number;
+  team_count: number;
 }
 
 export const getWorkflows = (): Promise<AxiosResponse<WorkflowListResponse>> =>
@@ -624,6 +668,212 @@ export const getRolePermissions = (): Promise<AxiosResponse<{
   note: string;
 }>> => 
   API.get('/admin/role-permissions');
+
+// Docker Mapping APIs
+export interface DockerMapping {
+  id: string;
+  script_type: string;
+  docker_image: string;
+  docker_tag: string;
+  description: string;
+  environment_variables: Record<string, string>;
+  volumes: string[];
+  ports: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateDockerMappingRequest {
+  script_type: string;
+  docker_image: string;
+  docker_tag: string;
+  description: string;
+  environment_variables: Record<string, string>;
+  volumes: string[];
+  ports: string[];
+  is_active: boolean;
+}
+
+export interface UpdateDockerMappingRequest {
+  script_type?: string;
+  docker_image?: string;
+  docker_tag?: string;
+  description?: string;
+  environment_variables?: Record<string, string>;
+  volumes?: string[];
+  ports?: string[];
+  is_active?: boolean;
+}
+
+export interface DockerMappingsResponse {
+  success: boolean;
+  mappings: DockerMapping[];
+  count: number;
+}
+
+export interface DockerMappingResponse {
+  success: boolean;
+  mapping: DockerMapping;
+}
+
+// Create Docker mapping
+export const createDockerMapping = (data: CreateDockerMappingRequest): Promise<AxiosResponse<DockerMappingResponse>> =>
+  API.post('/config/docker-mappings', data);
+
+// Get all Docker mappings
+export const getDockerMappings = (): Promise<AxiosResponse<DockerMappingsResponse>> =>
+  API.get('/config/docker-mappings');
+
+// Get specific Docker mapping
+export const getDockerMapping = (mappingId: string): Promise<AxiosResponse<DockerMappingResponse>> =>
+  API.get(`/config/docker-mappings/${mappingId}`);
+
+// Update Docker mapping
+export const updateDockerMapping = (mappingId: string, data: UpdateDockerMappingRequest): Promise<AxiosResponse<DockerMappingResponse>> =>
+  API.put(`/config/docker-mappings/${mappingId}`, data);
+
+// Delete Docker mapping
+export const deleteDockerMapping = (mappingId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+  API.delete(`/config/docker-mappings/${mappingId}`);
+
+// Resource Mapping APIs
+export interface ResourceMapping {
+  id: string;
+  mapping_type: string;
+  source_resource: string;
+  target_resource: string;
+  description: string;
+  metadata: Record<string, any>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateResourceMappingRequest {
+  mapping_type: string;
+  source_resource: string;
+  target_resource: string;
+  description: string;
+  metadata: Record<string, any>;
+  is_active: boolean;
+}
+
+export interface UpdateResourceMappingRequest {
+  mapping_type?: string;
+  source_resource?: string;
+  target_resource?: string;
+  description?: string;
+  metadata?: Record<string, any>;
+  is_active?: boolean;
+}
+
+export interface ResourceMappingsResponse {
+  success: boolean;
+  mappings: ResourceMapping[];
+  count: number;
+}
+
+export interface ResourceMappingResponse {
+  success: boolean;
+  mapping: ResourceMapping;
+}
+
+// Create resource mapping
+export const createResourceMapping = (data: CreateResourceMappingRequest): Promise<AxiosResponse<ResourceMappingResponse>> =>
+  API.post('/config/resource-mappings', data);
+
+// Get all resource mappings
+export const getResourceMappings = (): Promise<AxiosResponse<ResourceMappingsResponse>> =>
+  API.get('/config/resource-mappings');
+
+// Get specific resource mapping
+export const getResourceMapping = (mappingId: string): Promise<AxiosResponse<ResourceMappingResponse>> =>
+  API.get(`/config/resource-mappings/${mappingId}`);
+
+// Update resource mapping
+export const updateResourceMapping = (mappingId: string, data: UpdateResourceMappingRequest): Promise<AxiosResponse<ResourceMappingResponse>> =>
+  API.put(`/config/resource-mappings/${mappingId}`, data);
+
+// Delete resource mapping
+export const deleteResourceMapping = (mappingId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+  API.delete(`/config/resource-mappings/${mappingId}`);
+
+// Vault Configuration APIs
+export interface VaultConfig {
+  id: string;
+  config_name: string;
+  vault_address: string;
+  vault_token?: string; // Not returned in responses
+  namespace?: string;
+  mount_path: string;
+  engine_type: string;
+  engine_version: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateVaultConfigRequest {
+  config_name: string;
+  vault_address: string;
+  vault_token: string;
+  namespace?: string;
+  mount_path: string;
+  engine_type: string;
+  engine_version: string;
+  is_active: boolean;
+}
+
+export interface UpdateVaultConfigRequest {
+  config_name?: string;
+  vault_address?: string;
+  vault_token?: string;
+  namespace?: string;
+  mount_path?: string;
+  engine_type?: string;
+  engine_version?: string;
+  is_active?: boolean;
+}
+
+export interface VaultConfigsResponse {
+  success: boolean;
+  configs: VaultConfig[];
+  count: number;
+}
+
+export interface VaultConfigResponse {
+  success: boolean;
+  config: VaultConfig;
+}
+
+// Create vault configuration
+export const createVaultConfig = (data: CreateVaultConfigRequest): Promise<AxiosResponse<VaultConfigResponse>> =>
+  API.post('/config/vault-configs', data);
+
+// Get all vault configurations
+export const getVaultConfigs = (): Promise<AxiosResponse<VaultConfigsResponse>> =>
+  API.get('/config/vault-configs');
+
+// Get specific vault configuration
+export const getVaultConfig = (configId: string): Promise<AxiosResponse<VaultConfigResponse>> =>
+  API.get(`/config/vault-configs/${configId}`);
+
+// Update vault configuration
+export const updateVaultConfig = (configId: string, data: UpdateVaultConfigRequest): Promise<AxiosResponse<VaultConfigResponse>> =>
+  API.put(`/config/vault-configs/${configId}`, data);
+
+// Delete vault configuration
+export const deleteVaultConfig = (configId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
+  API.delete(`/config/vault-configs/${configId}`);
+
+// Get vault engine types
+export const getVaultEngineTypes = (): Promise<AxiosResponse<{ success: boolean; engine_types: string[] }>> =>
+  API.get('/config/vault-configs/engine-types');
+
+// Test vault connection
+export const testVaultConnection = (configId: string): Promise<AxiosResponse<{ success: boolean; message: string; details?: any }>> =>
+  API.post(`/config/vault-configs/${configId}/test`);
 
 // Get permissions for a specific role
 export const getRolePermissionsByRole = (role: string): Promise<AxiosResponse<{

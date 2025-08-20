@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getWorkflows, getAdminGroups, shareWorkflowWithGroup, unshareWorkflowWithGroup, getWorkflowPermissions, getAllWorkflowsWithPermissions, getGroupUsers, updateUserPermissionsNew } from '../../api';
-import type { Workflow, AdminGroup, WorkflowGroupShare, WorkflowPermission, WorkflowAssignmentData } from '../../api';
+import type { Workflow, AdminGroup, WorkflowGroupShare, WorkflowPermission, WorkflowAssignmentData, UserGroupRole } from '../../api';
 import tokenManager from '../../utils/tokenManager';
 import './AssignWorkflowsPage.css';
 
@@ -9,7 +9,7 @@ const AssignWorkflowsPage: React.FC = () => {
   const [groups, setGroups] = useState<AdminGroup[]>([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning' | 'info'; text: string } | null>(null);
   const [showUserPermissionsModal, setShowUserPermissionsModal] = useState(false);
   const [editingUser, setEditingUser] = useState<WorkflowPermission | null>(null);
   const [editForm, setEditForm] = useState<{ role: 'admin' | 'manager' | 'viewer'; is_active: boolean }>({ role: 'viewer', is_active: true });
@@ -170,11 +170,20 @@ const AssignWorkflowsPage: React.FC = () => {
       
       // Update the workflow assignments with real data
       setWorkflowAssignments(prev => new Map(prev.set(workflowId, {
-        workflow_id: permissionsData.workflow_id,
-        workflow_name: permissionsData.workflow_name,
-        workflow_description: permissionsData.workflow_description,
-        shared_groups: permissionsData.shared_groups,
-        user_permissions: permissionsData.user_permissions
+        workflow_id: permissionsData.workflow.id,
+        workflow_name: permissionsData.workflow.name,
+        workflow_description: permissionsData.workflow.description,
+        shared_groups: permissionsData.shares.map(share => ({
+          group_id: share.group_id,
+          group_name: share.group_name,
+          group_description: share.group_description,
+          permission: share.permission,
+          shared_at: share.shared_at,
+          last_updated: share.last_updated
+        })),
+        user_group_roles: permissionsData.user_group_roles,
+        total_groups_shared: permissionsData.total_groups_shared,
+        access_level: permissionsData.access_level
       })));
       
       // Update member counts for this workflow's groups
@@ -190,11 +199,13 @@ const AssignWorkflowsPage: React.FC = () => {
           group_id: group.id,
           group_name: group.name,
           group_description: group.description,
-          is_shared: false,
-          shared_at: undefined,
-          member_count: 0 // Will be updated when loadGroupMemberCounts runs
+          permission: 'none',
+          shared_at: '1970-01-01 00:00:00',
+          last_updated: '1970-01-01 00:00:00'
         })),
-        user_permissions: []
+        user_group_roles: [],
+        total_groups_shared: 0,
+        access_level: 'none'
       })));
       
       // Update member counts for this workflow's groups
@@ -212,7 +223,7 @@ const AssignWorkflowsPage: React.FC = () => {
       if (assignment) {
         const updatedGroups = assignment.shared_groups.map(group => 
           group.group_id === groupId 
-            ? { ...group, is_shared: true, shared_at: new Date().toISOString() }
+            ? { ...group, permission: 'read', shared_at: new Date().toISOString(), last_updated: new Date().toISOString() }
             : group
         );
         
@@ -240,7 +251,7 @@ const AssignWorkflowsPage: React.FC = () => {
       if (assignment) {
         const updatedGroups = assignment.shared_groups.map(group => 
           group.group_id === groupId 
-            ? { ...group, is_shared: false, shared_at: undefined }
+            ? { ...group, permission: 'none', shared_at: '1970-01-01 00:00:00', last_updated: '1970-01-01 00:00:00' }
             : group
         );
         
@@ -276,74 +287,18 @@ const AssignWorkflowsPage: React.FC = () => {
     }
   };
 
-  const openUserPermissionsModal = (user: WorkflowPermission) => {
-    // Check if user is admin (has admin permission)
-    const isUserAdmin = user.permission === 'admin';
+  const openUserPermissionsModal = (userRole: UserGroupRole) => {
+    // For now, we'll just show the group role details
+    // This could be enhanced to allow editing group roles in the future
     
-    setEditingUser(user);
-    setEditForm({ 
-      role: user.permission === 'write' ? 'manager' : user.permission === 'read' ? 'viewer' : 'admin',
-      is_active: true // Default to true, could be enhanced to get actual status
+    setMessage({ 
+      type: 'info', 
+      text: `Group "${userRole.group_name}" has role "${userRole.user_role}" with workflow permission "${userRole.workflow_permission}"` 
     });
-    setShowUserPermissionsModal(true);
-    
-    // If user is admin, show a message that role cannot be changed
-    if (isUserAdmin) {
-      setMessage({ 
-        type: 'warning', 
-        text: `User "${user.username}" has admin privileges. Their role cannot be changed.` 
-      });
-    }
   };
 
-  const handleUpdateUserPermissions = async () => {
-    if (!editingUser) return;
-    
-    // Check if user is admin and prevent role changes
-    const isUserAdmin = editingUser.permission === 'admin';
-    if (isUserAdmin) {
-      setMessage({ 
-        type: 'error', 
-        text: `Cannot change role for admin user "${editingUser.username}". Admin users have immutable privileges.` 
-      });
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      console.log('🔧 Updating user permissions with payload:', editForm);
-      console.log('🔧 Calling updateUserPermissionsNew with:', editingUser.user_id, editForm);
-      
-      await updateUserPermissionsNew(editingUser.user_id, editForm);
-      
-      // Update local state
-      const assignment = workflowAssignments.get(selectedWorkflow!.id);
-      if (assignment) {
-        const updatedPermissions = assignment.user_permissions.map(user => 
-          user.user_id === editingUser.user_id 
-            ? { 
-                ...user, 
-                permission: (editForm.role === 'admin' ? 'admin' : editForm.role === 'manager' ? 'write' : 'read') as 'admin' | 'write' | 'read'
-              }
-            : user
-        );
-        
-        setWorkflowAssignments(new Map(workflowAssignments.set(selectedWorkflow!.id, {
-          ...assignment,
-          user_permissions: updatedPermissions
-        })));
-      }
-      
-      setMessage({ type: 'success', text: `User permissions updated successfully!` });
-      setShowUserPermissionsModal(false);
-      setEditingUser(null);
-    } catch (error: any) {
-      console.error('❌ Error updating user permissions:', error);
-      setMessage({ type: 'error', text: 'Failed to update user permissions: ' + (error.response?.data?.detail || error.message) });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Note: User permission updates are now handled through group roles
+  // This function could be enhanced in the future to handle individual user permissions
 
   const closeUserPermissionsModal = () => {
     setShowUserPermissionsModal(false);
@@ -367,7 +322,7 @@ const AssignWorkflowsPage: React.FC = () => {
       </div>
 
       {message && (
-        <div className={`message ${message.type === 'success' ? 'success-message' : message.type === 'warning' ? 'warning-message' : 'error-message'}`}>
+        <div className={`message ${message.type === 'success' ? 'success-message' : message.type === 'warning' ? 'warning-message' : message.type === 'info' ? 'info-message' : 'error-message'}`}>
           {message.text}
           <button 
             className="message-close" 
@@ -415,16 +370,16 @@ const AssignWorkflowsPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {groups.map(group => {
+                  {groups && groups.length > 0 ? groups.map(group => {
                     const assignment = workflowAssignments.get(selectedWorkflow.id);
-                    const groupShare = assignment?.shared_groups.find(g => g.group_id === group.id);
-                    const isShared = groupShare?.is_shared || false;
+                    const groupShare = assignment?.shared_groups?.find(g => g.group_id === group.id);
+                    const isShared = groupShare ? groupShare.permission !== 'none' : false;
                     
                     return (
                       <tr key={group.id}>
                         <td>{group.name}</td>
                         <td>{group.description || 'No description'}</td>
-                        <td>{groupShare?.member_count || 0}</td>
+                        <td>{groupShare ? groupShare.permission : 'No access'}</td>
                         <td>
                           <span className={`status-badge ${isShared ? 'success' : 'warning'}`}>
                             {isShared ? 'Shared' : 'Not Shared'}
@@ -451,7 +406,13 @@ const AssignWorkflowsPage: React.FC = () => {
                         </td>
                       </tr>
                     );
-                  })}
+                  }) : (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', color: '#666' }}>
+                        No groups available
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -471,36 +432,42 @@ const AssignWorkflowsPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {workflowAssignments.get(selectedWorkflow.id)?.user_permissions.length ? (
-                    workflowAssignments.get(selectedWorkflow.id)?.user_permissions.map(user => (
-                      <tr key={user.user_id}>
-                        <td>{user.username}</td>
-                        <td>{user.email}</td>
-                        <td>
-                          <span className={getPermissionBadgeClass(user.permission)}>
-                            {getPermissionLabel(user.permission)}
-                          </span>
-                        </td>
-                        <td>{new Date(user.granted_at).toLocaleDateString()}</td>
-                        <td>
-                          <button
-                            className={`action-button ${user.permission === 'admin' ? 'secondary disabled' : 'secondary'}`}
-                            onClick={() => openUserPermissionsModal(user)}
-                            disabled={loading || user.permission === 'admin'}
-                            title={user.permission === 'admin' ? 'Admin users cannot be edited' : 'Edit user permissions'}
-                          >
-                            {user.permission === 'admin' ? 'Admin (Read-only)' : 'Edit'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', color: '#666' }}>
-                        No user permissions configured for this workflow
-                      </td>
-                    </tr>
-                  )}
+                                    {(() => {
+                    const assignment = workflowAssignments.get(selectedWorkflow.id);
+                    const userGroupRoles = assignment?.user_group_roles || [];
+                    if (userGroupRoles.length) {
+                      return userGroupRoles.map((userRole, index) => (
+                        <tr key={`${userRole.group_id}-${index}`}>
+                          <td>{userRole.group_name}</td>
+                          <td>Group Role: {userRole.user_role}</td>
+                          <td>
+                            <span className={getPermissionBadgeClass(userRole.workflow_permission)}>
+                              {getPermissionLabel(userRole.workflow_permission)}
+                            </span>
+                          </td>
+                          <td>Group-based</td>
+                          <td>
+                            <button
+                              className="action-button secondary"
+                              onClick={() => openUserPermissionsModal(userRole)}
+                              disabled={loading}
+                              title="View group role details"
+                            >
+                              View Details
+                            </button>
+                          </td>
+                        </tr>
+                      ));
+                    } else {
+                      return (
+                        <tr>
+                          <td colSpan={5} style={{ textAlign: 'center', color: '#666' }}>
+                            No user group roles configured for this workflow
+                          </td>
+                        </tr>
+                      );
+                    }
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -554,10 +521,7 @@ const AssignWorkflowsPage: React.FC = () => {
               </div>
             </div>
             <div className="modal-footer">
-              <button className="cancel-button" onClick={closeUserPermissionsModal}>Cancel</button>
-              <button className="add-button" onClick={handleUpdateUserPermissions} disabled={loading}>
-                {loading ? 'Updating...' : 'Update Permissions'}
-              </button>
+              <button className="cancel-button" onClick={closeUserPermissionsModal}>Close</button>
             </div>
           </div>
         </div>
