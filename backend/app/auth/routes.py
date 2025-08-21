@@ -29,6 +29,8 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str
     user: dict
+    role: str
+    role_type: str
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str

@@ -17,6 +17,120 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+# Simple in-memory cache for role information (with TTL)
+_role_cache = {}
+_role_cache_ttl = 300  # 5 minutes TTL for role cache
+
+def _get_cached_role(user_id: str) -> Optional[str]:
+    """Get cached role information if still valid."""
+    if user_id in _role_cache:
+        role_data = _role_cache[user_id]
+        # Check if cache is still valid
+        if datetime.now().timestamp() < role_data["expires_at"]:
+            return role_data["role"]
+        else:
+            # Remove expired cache entry
+            del _role_cache[user_id]
+    return None
+
+def _set_cached_role(user_id: str, role: str, ttl_seconds: int = 300):
+    """Cache role information with TTL."""
+    _role_cache[user_id] = {
+        "role": role,
+        "expires_at": datetime.now().timestamp() + ttl_seconds
+    }
+
+def _clear_role_cache(user_id: str = None):
+    """Clear role cache - either for specific user or all users."""
+    global _role_cache
+    if user_id:
+        _role_cache.pop(user_id, None)
+    else:
+        _role_cache.clear()
+
+async def invalidate_user_role_cache(user_id: str = None):
+    """
+    Invalidate role cache for a specific user or all users.
+    Call this when user roles are updated to ensure cache consistency.
+    """
+    _clear_role_cache(user_id)
+    logger.info(f"Role cache invalidated for {'all users' if user_id is None else f'user {user_id}'}")
+
+# Hybrid role verification function - JWT claims first, then DB fallback with caching
+async def get_user_role_from_token(current_user: dict) -> str:
+    """
+    Get the user's role using a hybrid approach for optimal performance and security.
+    
+    IMPORTANT: This function ONLY uses the 'role' field from user permissions.
+    The 'is_admin' field is NOT used for role verification because:
+    - is_admin=true: Permanent admin (cannot be changed, always has admin role)
+    - is_admin=false: Can have any role (viewer, manager, or temporary admin)
+    
+    Hybrid Strategy:
+    1. First check JWT claims (fastest, no DB call)
+    2. If JWT doesn't have role or role seems invalid, check cache
+    3. If cache miss, fallback to DB lookup (slower but always current)
+    4. Cache the result for subsequent requests
+    
+    This provides the best of both worlds:
+    - Fast verification using JWT claims
+    - Cached results for repeated requests
+    - Always up-to-date with role changes via DB fallback
+    """
+    try:
+        user_id = current_user["id"]
+        
+        # Step 1: Check JWT claims first (fastest)
+        if "role" in current_user:
+            jwt_role = current_user["role"]
+            # Validate JWT role is valid
+            if jwt_role in ["admin", "manager", "viewer"]:
+                logger.debug(f"Using JWT role claim: {jwt_role} for user {user_id}")
+                # Cache this result for future requests
+                _set_cached_role(user_id, jwt_role)
+                return jwt_role
+        
+        # Step 2: Check cache (fast, no DB call)
+        cached_role = _get_cached_role(user_id)
+        if cached_role:
+            logger.debug(f"Using cached role: {cached_role} for user {user_id}")
+            return cached_role
+        
+        # Step 3: Fallback to database lookup (slower but always current)
+        logger.debug(f"Cache miss, falling back to DB lookup for user {user_id}")
+        user_permission = await UserPermissionRepository.get_by_user_id(user_id)
+        if user_permission:
+            db_role = user_permission.get("role", "viewer")
+            logger.debug(f"DB lookup returned role: {db_role} for user {user_id}")
+            # Cache this result
+            _set_cached_role(user_id, db_role)
+            return db_role
+        
+        # Step 4: Emergency fallback - only use is_admin for permanent admins
+        # This should rarely happen if the system is properly configured
+        is_admin = current_user.get("is_admin", False)
+        if is_admin:
+            # Permanent admin - always has admin role
+            logger.warning(f"User {user_id} has is_admin=true but no role in permissions table. This indicates a system configuration issue.")
+            _set_cached_role(user_id, "admin")
+            return "admin"
+        else:
+            # Default to viewer role for users without explicit permissions
+            logger.warning(f"User {user_id} has no role in permissions table and is_admin=false. Defaulting to viewer role.")
+            _set_cached_role(user_id, "viewer")
+            return "viewer"
+        
+    except Exception as e:
+        logger.error(f"Error in hybrid role verification for user {current_user['id']}: {e}")
+        # Emergency fallback - only use is_admin for permanent admins
+        is_admin = current_user.get("is_admin", False)
+        if is_admin:
+            logger.error(f"Emergency fallback: User {current_user['id']} has is_admin=true, returning admin role")
+            return "admin"
+        else:
+            logger.error(f"Emergency fallback: User {current_user['id']} has is_admin=false, returning viewer role")
+            return "viewer"
+
 # Pydantic models for role permission management
 class RolePermissionAdd(BaseModel):
     role: str  # admin, manager, viewer
@@ -195,6 +309,14 @@ async def update_user_permissions_route(
     - viewer: Can only read and execute workflows
     """
     try:
+        # Additional security: Verify user role from auth token
+        user_role = await get_user_role_from_token(current_user)
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to manage user permissions."
+            )
+        
         # Validate role if provided
         if permission_data.role:
             if permission_data.role not in [UserRole.ADMIN, UserRole.MANAGER, UserRole.VIEWER]:
@@ -218,6 +340,9 @@ async def update_user_permissions_route(
             result = await update_user_permissions(user_id, permission_data.role, current_admin_id=current_user["id"])
             if not result.get("success", False):
                 raise HTTPException(status_code=400, detail=result.get("error", "Failed to update user permissions"))
+            
+            # Invalidate role cache for this user to ensure consistency
+            await invalidate_user_role_cache(user_id)
         
         # Update user active status if provided
         if permission_data.is_active is not None:
@@ -261,6 +386,14 @@ async def elevate_user_to_admin_route(
     - This creates a temporary admin elevation
     """
     try:
+        # Additional security: Verify user role from auth token
+        user_role = await get_user_role_from_token(current_user)
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to elevate users to admin."
+            )
+        
         # Prevent admin from elevating themselves
         if user_id == current_user["id"]:
             raise HTTPException(status_code=400, detail="Cannot elevate your own admin privileges")
@@ -282,6 +415,9 @@ async def elevate_user_to_admin_route(
         )
         
         if result.get("success", False):
+            # Invalidate role cache for this user to ensure consistency
+            await invalidate_user_role_cache(user_id)
+            
             return JSONResponse({
                 "success": True,
                 "message": f"User '{target_user['username']}' has been elevated to temporary admin role",
@@ -315,6 +451,14 @@ async def revoke_admin_privileges_route(
     - This downgrades the user to viewer role
     """
     try:
+        # Additional security: Verify user role from auth token
+        user_role = await get_user_role_from_token(current_user)
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to revoke admin privileges."
+            )
+        
         # Prevent admin from revoking their own privileges
         if user_id == current_user["id"]:
             raise HTTPException(status_code=400, detail="Cannot revoke your own admin privileges")
@@ -336,6 +480,9 @@ async def revoke_admin_privileges_route(
         )
         
         if result.get("success", False):
+            # Invalidate role cache for this user to ensure consistency
+            await invalidate_user_role_cache(user_id)
+            
             return JSONResponse({
                 "success": True,
                 "message": f"Temporary admin privileges revoked from user '{target_user['username']}'",
@@ -363,16 +510,31 @@ async def delete_user_route(
     Delete a user (admin only).
     This will permanently delete the user and all associated data.
     """
-    # Prevent admin from deleting themselves
-    if user_id == current_user["id"]:
-        raise HTTPException(status_code=400, detail="Cannot delete your own account")
-    
-    result = await delete_admin_user(user_id)
-    
-    if result["success"]:
-        return JSONResponse(result)
-    else:
-        raise HTTPException(status_code=400, detail=result["error"])
+    try:
+        # Additional security: Verify user role from auth token
+        user_role = await get_user_role_from_token(current_user)
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to delete users."
+            )
+        
+        # Prevent admin from deleting themselves
+        if user_id == current_user["id"]:
+            raise HTTPException(status_code=400, detail="Cannot delete your own account")
+        
+        result = await delete_admin_user(user_id)
+        
+        if result["success"]:
+            return JSONResponse(result)
+        else:
+            raise HTTPException(status_code=400, detail=result["error"])
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.patch("/users/{user_id}/active-status", tags=["Admin Users"])
 async def update_user_active_status_route(
@@ -1161,6 +1323,14 @@ async def add_role_permission_route(
     Note: Admin role permissions cannot be modified as they have all permissions by default.
     """
     try:
+        # Additional security: Verify user role from auth token
+        user_role = await get_user_role_from_token(current_user)
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to manage role permissions."
+            )
+        
         from app.db.repositories import RolePermissionRepository
         
         # Validate role
@@ -1203,6 +1373,9 @@ async def add_role_permission_route(
         if not success:
             raise HTTPException(status_code=500, detail="Failed to add permission")
         
+        # Invalidate role cache for all users since role permissions changed
+        await invalidate_user_role_cache()
+        
         return JSONResponse({
             "success": True,
             "message": f"Permission {permission_data.permission} added to role {permission_data.role} for resource {permission_data.resource_type}",
@@ -1231,6 +1404,14 @@ async def remove_role_permission_route(
     Note: Admin role permissions cannot be modified as they have all permissions by default.
     """
     try:
+        # Additional security: Verify user role from auth token
+        user_role = await get_user_role_from_token(current_user)
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to manage role permissions."
+            )
+        
         from app.db.repositories import RolePermissionRepository
         
         # Validate role
@@ -1273,6 +1454,9 @@ async def remove_role_permission_route(
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove permission")
         
+        # Invalidate role cache for all users since role permissions changed
+        await invalidate_user_role_cache()
+        
         return JSONResponse({
             "success": True,
             "message": f"Permission {permission_data.permission} removed from role {permission_data.role} for resource {permission_data.resource_type}",
@@ -1301,6 +1485,14 @@ async def reset_role_permissions_route(
     Note: Admin role cannot be reset as it has all permissions by default.
     """
     try:
+        # Additional security: Verify user role from auth token
+        user_role = await get_user_role_from_token(current_user)
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to reset role permissions."
+            )
+        
         from app.db.repositories import RolePermissionRepository
         
         # Validate role
@@ -1349,6 +1541,9 @@ async def reset_role_permissions_route(
         for role_name, permission, resource_type in default_permissions:
             await RolePermissionRepository.add_permission(role_name, permission, resource_type)
         
+        # Invalidate role cache for all users since role permissions changed
+        await invalidate_user_role_cache()
+        
         return JSONResponse({
             "success": True,
             "message": f"Role {role} permissions reset to defaults",
@@ -1362,4 +1557,75 @@ async def reset_role_permissions_route(
         raise
     except Exception as e:
         logger.error(f"Error resetting role permissions for {role}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") 
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/role-permissions/reset/all", tags=["Admin Role Permissions"])
+async def reset_all_role_permissions_route(
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Reset all role permissions to their default values (admin only).
+    This removes all custom permissions and restores the default permissions for all roles.
+    
+    This will reset:
+    - Admin role: All permissions on all resources
+    - Manager role: Read/write/execute on workflows, read on users, read/write on groups, read on system
+    - Viewer role: Read permissions on workflows, users, groups, and system
+    """
+    try:
+        # Additional security: Verify user role from auth token
+        user_role = await get_user_role_from_token(current_user)
+        
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to reset all permissions."
+            )
+        
+        from app.db.database import db_service
+        
+        # Reset all role permissions to defaults
+        success = await db_service.reset_all_role_permissions()
+        
+        if not success:
+            raise HTTPException(
+                status_code=500, 
+                detail="Failed to reset role permissions. Please check server logs for details."
+            )
+        
+        # Invalidate role cache for all users since all role permissions changed
+        await invalidate_user_role_cache()
+        
+        # Get the updated permissions to return in response
+        from app.db.repositories import RolePermissionRepository
+        
+        # Get counts for each role
+        admin_permissions = await RolePermissionRepository.get_by_role("admin")
+        manager_permissions = await RolePermissionRepository.get_by_role("manager")
+        viewer_permissions = await RolePermissionRepository.get_by_role("viewer")
+        
+        total_permissions = len(admin_permissions) + len(manager_permissions) + len(viewer_permissions)
+        
+        return JSONResponse({
+            "success": True,
+            "message": "All role permissions reset to defaults successfully",
+            "summary": {
+                "admin_permissions_count": len(admin_permissions),
+                "manager_permissions_count": len(manager_permissions),
+                "viewer_permissions_count": len(viewer_permissions),
+                "total_permissions": total_permissions
+            },
+            "details": {
+                "admin_permissions": admin_permissions,
+                "manager_permissions": manager_permissions,
+                "viewer_permissions": viewer_permissions
+            }
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resetting all role permissions: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+ 

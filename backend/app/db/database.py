@@ -677,6 +677,20 @@ class DatabaseService:
             logger.error(f"Error ensuring admin permissions: {e}")
             # Don't raise here as this is not critical for database operation
     
+    async def reset_all_role_permissions(self):
+        """Reset all role permissions to their default values."""
+        if not self.client:
+            return False
+            
+        try:
+            logger.info("Resetting all role permissions to defaults...")
+            await self._initialize_default_role_permissions()
+            logger.info("Successfully reset all role permissions to defaults")
+            return True
+        except Exception as e:
+            logger.error(f"Error resetting all role permissions: {e}")
+            return False
+    
     async def close(self):
         """Close database connection."""
         if self.client:

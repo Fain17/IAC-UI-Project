@@ -28,6 +28,18 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if not user.get("is_active", True):
         raise HTTPException(status_code=401, detail="Inactive user - account has been deactivated")
     
+    # Enrich user data with role information from permissions table
+    try:
+        user_permissions = await UserPermissionRepository.get_by_user_id(user_id)
+        if user_permissions:
+            user["role"] = user_permissions.get("role", "viewer")
+        else:
+            # If no permissions found, default to viewer role
+            user["role"] = "viewer"
+    except Exception as e:
+        # If there's an error getting permissions, default to viewer role
+        user["role"] = "viewer"
+    
     return user
 
 def get_current_active_user(current_user: dict = Depends(get_current_user)) -> dict:
@@ -39,21 +51,20 @@ def get_current_active_user(current_user: dict = Depends(get_current_user)) -> d
 async def get_current_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
     """Get current user and verify they have admin role (either permanent or temporary admin)."""
     try:
-        # Check if user has admin role in permissions (this covers both permanent and temporary admins)
-        user_permissions = await UserPermissionRepository.get_by_user_id(current_user["id"])
+        # Check if user has admin role using the role field that's now included in user data
+        user_role = current_user.get("role", "viewer")
         
-        if not user_permissions or user_permissions.get("role") != "admin":
+        if user_role != "admin":
             raise HTTPException(
                 status_code=403, 
-                detail="Admin access required. User must have admin role in permissions."
+                detail=f"Admin access required. User has role '{user_role}', but admin role is required."
             )
         
         return current_user
     except HTTPException:
         raise
     except Exception as e:
-        # If there's an error checking permissions, fall back to checking is_admin column
-        # This provides backward compatibility
+        # Emergency fallback - only use is_admin for permanent admins
         if not current_user.get("is_admin", False):
             raise HTTPException(status_code=403, detail="Admin access required")
         return current_user

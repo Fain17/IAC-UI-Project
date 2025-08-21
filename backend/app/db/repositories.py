@@ -678,6 +678,19 @@ class RolePermissionRepository:
             logger.error(f"Error getting permissions: {e}")
             return []
 
+    @staticmethod
+    async def clear_all_permissions() -> bool:
+        """Clear all role permissions from the table."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute("DELETE FROM role_permissions")
+            logger.info(f"Cleared all role permissions. Rows affected: {result.rows_affected}")
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing all role permissions: {e}")
+            return False
+
 
 class WorkflowShareRepository:
     """Repository for managing workflow shares with groups."""
