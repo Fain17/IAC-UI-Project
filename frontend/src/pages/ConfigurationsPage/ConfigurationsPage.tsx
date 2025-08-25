@@ -884,7 +884,7 @@ const ConfigurationsPage: React.FC = () => {
           {active === 'docker' && (
             <div className="docker-mappings-section">
               <div className="section-header">
-                <h2>Docker Execution Mapping</h2>
+              <h2>Docker Execution Mapping</h2>
                 <button 
                   onClick={() => setShowCreateModal(true)}
                   className="create-button"
@@ -1079,7 +1079,7 @@ const ConfigurationsPage: React.FC = () => {
               </div>
             </div>
           )}
-                    {active === 'vault' && (
+          {active === 'vault' && (
             <div className="vault-config-section">
               <div className="section-header">
                 <h2>Vault Configuration (HashiCorp)</h2>

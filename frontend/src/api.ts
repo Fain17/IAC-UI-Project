@@ -884,6 +884,31 @@ export const getRolePermissionsByRole = (role: string): Promise<AxiosResponse<{
 }>> => 
   API.get(`/admin/role-permissions/${role}`);
 
+// Get current user role and permissions from token
+export interface UserRoleResponse {
+  success: boolean;
+  user_id: string;
+  user_role: string;
+  permissions: {
+    create: boolean;
+    read: boolean;
+    write: boolean;
+    delete: boolean;
+    execute: boolean;
+    assign: boolean;
+  };
+  raw_permission_data: {
+    id: number;
+    user_id: string;
+    role: string;
+    created_at: string;
+    updated_at: string;
+  };
+}
+
+export const getCurrentUserRole = (): Promise<AxiosResponse<UserRoleResponse>> => 
+  API.get('/workflow/debug/user-role');
+
 // Reset role permissions for a specific role
 export const resetRolePermissions = (role: string): Promise<AxiosResponse<{
   success: boolean;

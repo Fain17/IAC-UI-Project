@@ -59,7 +59,8 @@ const SettingsPage: React.FC = () => {
   // State for current user
   const [userUsername, setUserUsername] = useState<string>('');
   const [userEmail, setUserEmail] = useState<string>('');
-  const [userIsAdmin, setUserIsAdmin] = useState<boolean>(false);
+  const [userRole, setUserRole] = useState<string>('');
+  const [userPermissions, setUserPermissions] = useState<any>(null);
 
   // State for active submenu
   const location = useLocation();
@@ -72,6 +73,38 @@ const SettingsPage: React.FC = () => {
     return 'general';
   }, [location.pathname]);
   useEffect(() => { setActiveSubMenu(derivedSubMenu); }, [derivedSubMenu]);
+
+  // Load user role and permissions
+  useEffect(() => {
+    const loadUserInfo = async () => {
+      try {
+        const user = tokenManager.getUser();
+        if (user) {
+          setUserUsername(user.username || '');
+          setUserEmail(user.email || '');
+          
+          // Fetch role from API
+          const response = await fetch('http://localhost:8000/workflow/debug/user-role', {
+            headers: {
+              Authorization: `Bearer ${tokenManager.getToken()}`
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+              setUserRole(data.user_role);
+              setUserPermissions(data.permissions);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load user info:', error);
+      }
+    };
+
+    loadUserInfo();
+  }, []);
 
   // State for general settings
   const [notifications, setNotifications] = useState(true);
@@ -434,14 +467,7 @@ const SettingsPage: React.FC = () => {
   }, []);
 
   // Initialize user data and load content based on active submenu
-  useEffect(() => {
-    const user = tokenManager.getUser();
-    if (user) {
-      setUserUsername(user.username || '');
-      setUserEmail(user.email || '');
-      setUserIsAdmin(user.isAdmin || false);
-    }
-  }, []);
+
 
   // Load data based on active submenu
   useEffect(() => {
@@ -760,7 +786,7 @@ const SettingsPage: React.FC = () => {
             <div className="settings-section">
               <div className="section-header">
                 <h2>User Management</h2>
-                {userIsAdmin && (
+                {userRole === 'admin' && (
                   <button 
                     onClick={() => setShowUserForm(true)}
                     className="create-button"
@@ -783,7 +809,7 @@ const SettingsPage: React.FC = () => {
                       <th>Group</th>
                       <th>Status</th>
                       <th>Created</th>
-                      {userIsAdmin && <th>Actions</th>}
+                      {userRole === 'admin' && <th>Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -805,7 +831,7 @@ const SettingsPage: React.FC = () => {
                             </span>
                           </td>
                           <td>{new Date(user.created_at).toLocaleDateString()}</td>
-                          {userIsAdmin && (
+                          {userRole === 'admin' && (
                             <td>
                               <button className="action-button edit" onClick={() => handleEditUser(user)}>Edit</button>
                               {/* Removed per request: Manage Groups moved to Groups page */}
@@ -816,7 +842,7 @@ const SettingsPage: React.FC = () => {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={userIsAdmin ? 7 : 6}>No users found</td>
+                        <td colSpan={userRole === 'admin' ? 7 : 6}>No users found</td>
                       </tr>
                     )}
                   </tbody>
@@ -834,7 +860,7 @@ const SettingsPage: React.FC = () => {
             <div className="settings-section">
               <div className="section-header">
                 <h2>User Groups</h2>
-                {userIsAdmin && (
+                {userRole === 'admin' && (
                   <button 
                     onClick={() => setShowCreateGroup(true)}
                     className="create-button"
@@ -855,7 +881,7 @@ const SettingsPage: React.FC = () => {
                         <th>Description</th>
                         <th>Members</th>
                         <th>Created</th>
-                        {userIsAdmin && <th>Actions</th>}
+                        {userRole === 'admin' && <th>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -865,7 +891,7 @@ const SettingsPage: React.FC = () => {
                           <td>{group.description}</td>
                           <td>{group.member_count}</td>
                           <td>{new Date(group.created_at).toLocaleDateString()}</td>
-                          {userIsAdmin && (
+                          {userRole === 'admin' && (
                             <td>
                               <button className="action-button" onClick={() => openGroupUsersForGroup(group)}>Manage Users</button>
                               <button className="action-button edit" onClick={() => handleEditGroup(group)}>Edit</button>
@@ -923,7 +949,7 @@ const SettingsPage: React.FC = () => {
                     </button>
                   </div>
                   
-                  {userIsAdmin && (
+                  {userRole === 'admin' && (
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button 
                         onClick={() => setShowAddPermissionModal(true)}
@@ -971,7 +997,7 @@ const SettingsPage: React.FC = () => {
                         <th>Resource Type</th>
                         <th>Permissions</th>
                         <th>Last Updated</th>
-                        {userIsAdmin && <th>Actions</th>}
+                        {userRole === 'admin' && <th>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -992,7 +1018,7 @@ const SettingsPage: React.FC = () => {
                               {rolePerm.permissions.map((permission, permIndex) => (
                                 <span key={permIndex} className={`permission-badge ${permission}`}>
                                   {permission}
-                                  {userIsAdmin && (
+                                  {userRole === 'admin' && (
                                     <button
                                       onClick={() => handleRemoveRolePermission(rolePerm.role, permission, rolePerm.resource_type)}
                                       disabled={loading}
@@ -1016,7 +1042,7 @@ const SettingsPage: React.FC = () => {
                             </div>
                           </td>
                           <td>{new Date(rolePerm.updated_at).toLocaleDateString()}</td>
-                          {userIsAdmin && (
+                          {userRole === 'admin' && (
                             <td>
                               <button
                                 onClick={() => handleRemoveRolePermission(rolePerm.role, 'all', rolePerm.resource_type)}
@@ -1074,7 +1100,7 @@ const SettingsPage: React.FC = () => {
                         <th>Description</th>
                         <th>Category</th>
                         <th>Status</th>
-                        {userIsAdmin && <th>Actions</th>}
+                        {userRole === 'admin' && <th>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -1088,7 +1114,7 @@ const SettingsPage: React.FC = () => {
                               {permission.is_active ? 'Active' : 'Inactive'}
                             </span>
                           </td>
-                          {userIsAdmin && (
+                          {userRole === 'admin' && (
                             <td>
                               <button className="action-button edit">Edit</button>
                             </td>

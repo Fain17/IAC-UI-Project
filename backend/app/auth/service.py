@@ -715,9 +715,36 @@ class AuthService:
 
     async def login_user(self, user_data: dict) -> dict:
         """Login user and return both access and refresh tokens."""
+        # Get user role from permissions table (NOT from is_admin field)
+        from app.db.repositories import UserPermissionRepository
+        user_permission = await UserPermissionRepository.get_by_user_id(str(user_data["id"]))
+        
+        # IMPORTANT: Role comes from permissions table, not from is_admin field
+        # is_admin=true means permanent admin (cannot be changed)
+        # is_admin=false means role can be viewer, manager, or temporary admin
+        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        
+        # Include role and permissions in JWT claims for granular access control
+        # Note: is_admin is included for reference but NOT used for role verification
+        # Get actual permissions from database instead of hardcoded model
+        from app.db.repositories import RolePermissionRepository
+        db_permissions = await RolePermissionRepository.get_by_role(user_role)
+        
+        # Extract permission names from database results
+        user_permissions = []
+        for perm in db_permissions:
+            user_permissions.append(perm["permission"])
+        
+        jwt_data = {
+            "sub": str(user_data["id"]),
+            "role": user_role,  # This is the actual role from permissions
+            "permissions": user_permissions,  # List of permissions from database
+            "is_admin": user_data.get("is_admin", False)  # Reference only - not used for role checks
+        }
+        
         # Create short-lived access token (15 minutes)
         access_token = await self.create_access_token(
-            data={"sub": str(user_data["id"])},
+            data=jwt_data,
             expires_delta=timedelta(minutes=self.access_token_expire_minutes)
         )
         
@@ -726,12 +753,12 @@ class AuthService:
             # Convert to minutes for short durations
             minutes = int(self.refresh_token_expire_days * 24 * 60)
             refresh_token = await self.create_refresh_token(
-                data={"sub": str(user_data["id"])},
+                data=jwt_data,
                 expires_delta=timedelta(minutes=minutes)
             )
         else:
             refresh_token = await self.create_refresh_token(
-                data={"sub": str(user_data["id"])},
+                data=jwt_data,
                 expires_delta=timedelta(days=self.refresh_token_expire_days)
             )
         

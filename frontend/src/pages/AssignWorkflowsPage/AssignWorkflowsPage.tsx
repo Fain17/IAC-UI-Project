@@ -37,7 +37,7 @@ const AssignWorkflowsPage: React.FC = () => {
       setCurrentUserId(userData.id);
       
       // Check if user is already admin before making API call
-      if (userData.isAdmin) {
+      if (userData.role === 'admin') {
         console.log('🔐 Current user is already admin, skipping force update');
         setHasForcedAdmin(true);
       } else {
@@ -62,7 +62,7 @@ const AssignWorkflowsPage: React.FC = () => {
       // Update local user data to reflect admin status
       const userData = tokenManager.getUser();
       if (userData) {
-        const updatedUserData = { ...userData, isAdmin: true };
+        const updatedUserData = { ...userData, role: 'admin' };
         localStorage.setItem('user_data', JSON.stringify(updatedUserData));
       }
     } catch (error) {

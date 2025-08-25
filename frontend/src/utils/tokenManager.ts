@@ -4,7 +4,7 @@ interface UserData {
     id?: string;
     username?: string;
     email?: string;
-    isAdmin?: boolean;
+    // Role is fetched dynamically from server verification endpoint
 }
 
 class TokenManager {
@@ -182,6 +182,9 @@ class TokenManager {
             console.error('❌ Error calling logout endpoint:', error);
         } finally {
             console.log('🔌 Disconnecting WebSocket and clearing auth data...');
+            
+
+            
             this.clearAuth();
             console.log('✅ Logout process complete');
         }
@@ -225,6 +228,8 @@ class TokenManager {
 
         return response;
     }
+
+
 }
 
 // Global instance

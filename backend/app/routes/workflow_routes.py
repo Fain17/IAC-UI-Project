@@ -6,7 +6,7 @@ from app.services.workflow_service import (
     get_next_available_order, reorder_steps_sequentially, generate_step_id
 )
 from app.db.repositories import WorkflowRepository
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, verify_permission
 from app.db.models import WorkflowCreateRequest, WorkflowUpdate, WorkflowStep
 from typing import List, Dict, Any
 import logging
@@ -915,7 +915,7 @@ async def execute_workflow_route(
     workflow_id: str,
     execution_type: str = Query("local", pattern="^(local|docker)$"),
     continue_on_failure: bool = Query(False),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(verify_permission("execute"))
 ):
     """
     Execute the entire workflow sequentially.
@@ -923,18 +923,19 @@ async def execute_workflow_route(
     - Skips steps with is_active = False.
     - Tracks overall status: init, running, completed, failed, partial_failed, completed_with_skips.
     - Persists per-step last execution metadata back into the workflow's steps.
+    
+    Security:
+    - Requires 'execute' permission
+    - Role and permissions verified on each request from database
+    - No client-side role/permission storage
     """
     try:
-        # Check user permission to execute workflows
-        from app.db.repositories import UserPermissionRepository
-        user_permission = await UserPermissionRepository.get_by_user_id(current_user["id"])
-        user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
+        # User permissions already verified by verify_permission dependency
+        # current_user now contains fresh role and permissions data
+        user_role = current_user.get("role", "viewer")
+        user_permissions = current_user.get("permissions", [])
         
-        if not _check_user_permission(user_role, "execute"):
-            raise HTTPException(
-                status_code=403, 
-                detail="Insufficient permissions. Only admins, managers, and viewers can execute workflows."
-            )
+        logger.info(f"User {current_user['id']} with role '{user_role}' and permissions {user_permissions} executing workflow {workflow_id}")
         
         started_at = datetime.now()
         overall_status = "init"

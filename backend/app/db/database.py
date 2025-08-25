@@ -129,7 +129,7 @@ class DatabaseService:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role TEXT NOT NULL,  -- admin, manager, viewer
                     permission TEXT NOT NULL,  -- read, write, delete, execute
-                    resource_type TEXT NOT NULL,  -- workflow, user, group, system, etc.
+                    resource_type TEXT NOT NULL,  -- workflow, group, etc.
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(role, permission, resource_type)
@@ -142,7 +142,7 @@ class DatabaseService:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id TEXT NOT NULL,
                     permission TEXT NOT NULL,  -- read, write, execute, delete
-                    resource_type TEXT NOT NULL,  -- workflow, user, group, etc.
+                    resource_type TEXT NOT NULL,  -- workflow, group, etc.
                     resource_id TEXT,  -- specific resource ID, null for global permissions
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -588,7 +588,7 @@ class DatabaseService:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role TEXT NOT NULL,  -- admin, manager, viewer
                     permission TEXT NOT NULL,  -- read, write, delete, execute
-                    resource_type TEXT NOT NULL,  -- workflow, user, group, system, etc.
+                    resource_type TEXT NOT NULL,  -- workflow, group, etc.
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(role, permission, resource_type)
@@ -601,18 +601,10 @@ class DatabaseService:
                 ("admin", "write", "workflow"),
                 ("admin", "delete", "workflow"),
                 ("admin", "execute", "workflow"),
-                ("admin", "read", "user"),
-                ("admin", "write", "user"),
-                ("admin", "delete", "user"),
-                ("admin", "execute", "user"),
                 ("admin", "read", "group"),
                 ("admin", "write", "group"),
                 ("admin", "delete", "group"),
                 ("admin", "execute", "group"),
-                ("admin", "read", "system"),
-                ("admin", "write", "system"),
-                ("admin", "delete", "system"),
-                ("admin", "execute", "system"),
             ]
             
             # Default permissions for Manager role
@@ -620,18 +612,14 @@ class DatabaseService:
                 ("manager", "read", "workflow"),
                 ("manager", "write", "workflow"),
                 ("manager", "execute", "workflow"),
-                ("manager", "read", "user"),
                 ("manager", "read", "group"),
                 ("manager", "write", "group"),
-                ("manager", "read", "system"),
             ]
             
             # Default permissions for Viewer role
             viewer_permissions = [
                 ("viewer", "read", "workflow"),
-                ("viewer", "read", "user"),
                 ("viewer", "read", "group"),
-                ("viewer", "read", "system"),
             ]
             
             # Insert all permissions
@@ -664,7 +652,7 @@ class DatabaseService:
             """)
             
             admin_permission_count = result.rows[0][0]
-            expected_admin_permissions = 16  # 4 permissions × 4 resource types
+            expected_admin_permissions = 8  # 4 permissions × 2 resource types
             
             if admin_permission_count < expected_admin_permissions:
                 logger.warning(f"Admin role has {admin_permission_count} permissions, expected {expected_admin_permissions}")
@@ -676,6 +664,20 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error ensuring admin permissions: {e}")
             # Don't raise here as this is not critical for database operation
+    
+    async def reset_all_role_permissions(self):
+        """Reset all role permissions to their default values."""
+        if not self.client:
+            return False
+            
+        try:
+            logger.info("Resetting all role permissions to defaults...")
+            await self._initialize_default_role_permissions()
+            logger.info("Successfully reset all role permissions to defaults")
+            return True
+        except Exception as e:
+            logger.error(f"Error resetting all role permissions: {e}")
+            return False
     
     async def close(self):
         """Close database connection."""
