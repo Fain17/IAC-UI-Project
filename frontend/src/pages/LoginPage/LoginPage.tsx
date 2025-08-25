@@ -37,8 +37,8 @@ const LoginPage: React.FC = () => {
           {
             id: response.data.user.id,
             username: response.data.user.username,
-            email: response.data.user.email,
-            isAdmin: !!response.data.user.is_admin
+            email: response.data.user.email
+            // Role will be fetched dynamically from /workflow/debug/user-role endpoint
           }
         );
       } else {
@@ -48,8 +48,8 @@ const LoginPage: React.FC = () => {
           {
             id: response.data.user.id,
             username: response.data.user.username,
-            email: response.data.user.email,
-            isAdmin: !!response.data.user.is_admin
+            email: response.data.user.email
+            // Role will be fetched dynamically from /workflow/debug/user-role endpoint
           }
         );
       }

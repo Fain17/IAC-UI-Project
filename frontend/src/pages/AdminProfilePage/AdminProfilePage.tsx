@@ -2,22 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import tokenManager from '../../utils/tokenManager';
-import { getCurrentUserPermissions } from '../../api';
+
 import './AdminProfilePage.css';
 
 interface AdminInfo {
   username: string;
   email: string;
-  isAdmin: boolean;
-  role?: string;
+  role: string;
 }
 
 const AdminProfilePage: React.FC = () => {
   const [adminInfo, setAdminInfo] = useState<AdminInfo>({
     username: '',
     email: '',
-    isAdmin: false,
-    role: 'viewer'
+    role: ''
   });
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -36,47 +34,44 @@ const AdminProfilePage: React.FC = () => {
   const [usernameError, setUsernameError] = useState('');
   const navigate = useNavigate();
 
-  // Function to fetch current user permissions
-  const fetchCurrentUserPermissions = async () => {
-    try {
-      const response = await getCurrentUserPermissions();
-      return response.data;
-    } catch (error) {
-      console.error('Failed to fetch current user permissions:', error);
-      return null;
-    }
-  };
+
 
 
 
   useEffect(() => {
     const loadUserInfo = async () => {
-      // Load admin info from TokenManager
-      const user = tokenManager.getUser();
-      if (user) {
-        setAdminInfo({
-          username: user.username || '',
-          email: user.email || '',
-          isAdmin: user.isAdmin || false,
-          role: 'viewer'
-        });
-        setNewUsername(user.username || '');
-
-        // Fetch current user permissions using the new endpoint
-        try {
-          const permissions = await fetchCurrentUserPermissions();
-          if (permissions) {
-            setAdminInfo(prev => ({
-              ...prev,
-              role: permissions.role || 'viewer',
-              isAdmin: permissions.role === 'admin' || prev.isAdmin
-            }));
+      try {
+        // Load user info from TokenManager
+        const user = tokenManager.getUser();
+        if (user) {
+          // Fetch role from API
+          const response = await axios.get('http://localhost:8000/workflow/debug/user-role', {
+            headers: {
+              Authorization: `Bearer ${tokenManager.getToken()}`
+            }
+          });
+          
+          if (response.data.success) {
+            setAdminInfo({
+              username: user.username || '',
+              email: user.email || '',
+              role: response.data.user_role
+            });
+            setNewUsername(user.username || '');
           }
-        } catch (error) {
-          console.error('Failed to fetch user permissions:', error);
         }
-
-
+      } catch (error) {
+        console.error('Failed to load user info:', error);
+        // Set default role if API fails
+        const user = tokenManager.getUser();
+        if (user) {
+          setAdminInfo({
+            username: user.username || '',
+            email: user.email || '',
+            role: 'User'
+          });
+          setNewUsername(user.username || '');
+        }
       }
     };
 
