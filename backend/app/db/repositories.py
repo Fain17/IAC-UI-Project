@@ -593,18 +593,10 @@ class RolePermissionRepository:
                 ("admin", "write", "workflow"),
                 ("admin", "delete", "workflow"),
                 ("admin", "execute", "workflow"),
-                ("admin", "read", "user"),
-                ("admin", "write", "user"),
-                ("admin", "delete", "user"),
-                ("admin", "execute", "user"),
                 ("admin", "read", "group"),
                 ("admin", "write", "group"),
                 ("admin", "delete", "group"),
                 ("admin", "execute", "group"),
-                ("admin", "read", "system"),
-                ("admin", "write", "system"),
-                ("admin", "delete", "system"),
-                ("admin", "execute", "system"),
             ]
             
             # Check and add any missing admin permissions
@@ -1766,32 +1758,99 @@ class WorkflowRepository:
     
     @staticmethod
     async def get_by_id(workflow_id: str, user_id: str) -> Optional[Dict]:
-        """Get workflow by ID for a specific user."""
+        """Get workflow by ID for a specific user (including shared workflows)."""
         if not db_service.client:
             return None
         try:
+            # First check if user owns the workflow directly
             result = await db_service.client.execute(
                 "SELECT id, user_id, name, description, steps, is_active, created_at, updated_at FROM workflows WHERE id = ? AND user_id = ?",
                 [workflow_id, user_id]
             )
             
-            if not result.rows:
-                return None
+            if result.rows:
+                workflow = result.rows[0]
+                return {
+                    "id": workflow[0],
+                    "user_id": workflow[1],
+                    "name": workflow[2],
+                    "description": workflow[3],
+                    "steps": json.loads(workflow[4]),
+                    "is_active": bool(workflow[5]),
+                    "created_at": workflow[6],
+                    "updated_at": workflow[7]
+                }
             
-            workflow = result.rows[0]
-            return {
-                "id": workflow[0],
-                "user_id": workflow[1],
-                "name": workflow[2],
-                "description": workflow[3],
-                "steps": json.loads(workflow[4]),
-                "is_active": bool(workflow[5]),
-                "created_at": workflow[6],
-                "updated_at": workflow[7]
-            }
+            # If not owner, check if workflow is shared with user's groups
+            result = await db_service.client.execute("""
+                SELECT DISTINCT w.id, w.user_id, w.name, w.description, w.steps, w.is_active, w.created_at, w.updated_at
+                FROM workflows w
+                JOIN workflow_shares ws ON w.id = ws.workflow_id
+                JOIN user_group_assignments uga ON ws.group_id = uga.group_id
+                WHERE uga.user_id = ? AND w.id = ? AND w.is_active = TRUE
+            """, [user_id, workflow_id])
+            
+            if result.rows:
+                workflow = result.rows[0]
+                return {
+                    "id": workflow[0],
+                    "user_id": workflow[1],
+                    "name": workflow[2],
+                    "description": workflow[3],
+                    "steps": json.loads(workflow[4]),
+                    "is_active": bool(workflow[5]),
+                    "created_at": workflow[6],
+                    "updated_at": workflow[7]
+                }
+            
+            return None
         except Exception as e:
             logger.error(f"Error getting workflow by ID: {e}")
             return None
+
+    @staticmethod
+    async def get_user_workflow_permissions(workflow_id: str, user_id: str) -> Dict[str, str]:
+        """
+        Get user's permissions for a specific workflow.
+        Returns dict with 'access_type' and 'permissions'.
+        """
+        if not db_service.client:
+            return {"access_type": "none", "permissions": []}
+        
+        try:
+            # Check if user owns the workflow
+            result = await db_service.client.execute(
+                "SELECT user_id FROM workflows WHERE id = ? AND user_id = ?",
+                [workflow_id, user_id]
+            )
+            
+            if result.rows:
+                return {
+                    "access_type": "owner",
+                    "permissions": ["read", "write", "execute", "delete", "share"]
+                }
+            
+            # Check shared access through groups
+            result = await db_service.client.execute("""
+                SELECT ws.permission
+                FROM workflow_shares ws
+                JOIN user_group_assignments uga ON ws.group_id = uga.group_id
+                WHERE uga.user_id = ? AND ws.workflow_id = ?
+            """, [user_id, workflow_id])
+            
+            if result.rows:
+                # Get all permissions from shared access
+                permissions = [row[0] for row in result.rows]
+                return {
+                    "access_type": "shared",
+                    "permissions": permissions
+                }
+            
+            return {"access_type": "none", "permissions": []}
+            
+        except Exception as e:
+            logger.error(f"Error getting user workflow permissions: {e}")
+            return {"access_type": "none", "permissions": []}
     
     @staticmethod
     async def get_by_id_admin(workflow_id: str) -> Optional[Dict]:

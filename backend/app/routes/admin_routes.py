@@ -17,111 +17,45 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# Simple in-memory cache for role information (with TTL)
-_role_cache = {}
-_role_cache_ttl = 300  # 5 minutes TTL for role cache
-
-def _get_cached_role(user_id: str) -> Optional[str]:
-    """Get cached role information if still valid."""
-    if user_id in _role_cache:
-        role_data = _role_cache[user_id]
-        # Check if cache is still valid
-        if datetime.now().timestamp() < role_data["expires_at"]:
-            return role_data["role"]
-        else:
-            # Remove expired cache entry
-            del _role_cache[user_id]
-    return None
-
-def _set_cached_role(user_id: str, role: str, ttl_seconds: int = 300):
-    """Cache role information with TTL."""
-    _role_cache[user_id] = {
-        "role": role,
-        "expires_at": datetime.now().timestamp() + ttl_seconds
-    }
-
-def _clear_role_cache(user_id: str = None):
-    """Clear role cache - either for specific user or all users."""
-    global _role_cache
-    if user_id:
-        _role_cache.pop(user_id, None)
-    else:
-        _role_cache.clear()
-
-async def invalidate_user_role_cache(user_id: str = None):
-    """
-    Invalidate role cache for a specific user or all users.
-    Call this when user roles are updated to ensure cache consistency.
-    """
-    _clear_role_cache(user_id)
-    logger.info(f"Role cache invalidated for {'all users' if user_id is None else f'user {user_id}'}")
-
-# Hybrid role verification function - JWT claims first, then DB fallback with caching
+# Database-only role verification function
 async def get_user_role_from_token(current_user: dict) -> str:
     """
-    Get the user's role using a hybrid approach for optimal performance and security.
+    Get the user's role from database for every request.
     
     IMPORTANT: This function ONLY uses the 'role' field from user permissions.
     The 'is_admin' field is NOT used for role verification because:
     - is_admin=true: Permanent admin (cannot be changed, always has admin role)
     - is_admin=false: Can have any role (viewer, manager, or temporary admin)
     
-    Hybrid Strategy:
-    1. First check JWT claims (fastest, no DB call)
-    2. If JWT doesn't have role or role seems invalid, check cache
-    3. If cache miss, fallback to DB lookup (slower but always current)
-    4. Cache the result for subsequent requests
-    
-    This provides the best of both worlds:
-    - Fast verification using JWT claims
-    - Cached results for repeated requests
-    - Always up-to-date with role changes via DB fallback
+    Strategy:
+    1. Always fetch fresh role data from database
+    2. Ensure role is always up-to-date with latest changes
+    3. No caching for maximum security and consistency
     """
     try:
         user_id = current_user["id"]
         
-        # Step 1: Check JWT claims first (fastest)
-        if "role" in current_user:
-            jwt_role = current_user["role"]
-            # Validate JWT role is valid
-            if jwt_role in ["admin", "manager", "viewer"]:
-                logger.debug(f"Using JWT role claim: {jwt_role} for user {user_id}")
-                # Cache this result for future requests
-                _set_cached_role(user_id, jwt_role)
-                return jwt_role
-        
-        # Step 2: Check cache (fast, no DB call)
-        cached_role = _get_cached_role(user_id)
-        if cached_role:
-            logger.debug(f"Using cached role: {cached_role} for user {user_id}")
-            return cached_role
-        
-        # Step 3: Fallback to database lookup (slower but always current)
-        logger.debug(f"Cache miss, falling back to DB lookup for user {user_id}")
+        # Always fetch fresh role data from database
         user_permission = await UserPermissionRepository.get_by_user_id(user_id)
         if user_permission:
             db_role = user_permission.get("role", "viewer")
             logger.debug(f"DB lookup returned role: {db_role} for user {user_id}")
-            # Cache this result
-            _set_cached_role(user_id, db_role)
             return db_role
         
-        # Step 4: Emergency fallback - only use is_admin for permanent admins
+        # Emergency fallback - only use is_admin for permanent admins
         # This should rarely happen if the system is properly configured
         is_admin = current_user.get("is_admin", False)
         if is_admin:
             # Permanent admin - always has admin role
             logger.warning(f"User {user_id} has is_admin=true but no role in permissions table. This indicates a system configuration issue.")
-            _set_cached_role(user_id, "admin")
             return "admin"
         else:
             # Default to viewer role for users without explicit permissions
             logger.warning(f"User {user_id} has no role in permissions table and is_admin=false. Defaulting to viewer role.")
-            _set_cached_role(user_id, "viewer")
             return "viewer"
         
     except Exception as e:
-        logger.error(f"Error in hybrid role verification for user {current_user['id']}: {e}")
+        logger.error(f"Error in role verification for user {current_user['id']}: {e}")
         # Emergency fallback - only use is_admin for permanent admins
         is_admin = current_user.get("is_admin", False)
         if is_admin:
@@ -340,9 +274,6 @@ async def update_user_permissions_route(
             result = await update_user_permissions(user_id, permission_data.role, current_admin_id=current_user["id"])
             if not result.get("success", False):
                 raise HTTPException(status_code=400, detail=result.get("error", "Failed to update user permissions"))
-            
-            # Invalidate role cache for this user to ensure consistency
-            await invalidate_user_role_cache(user_id)
         
         # Update user active status if provided
         if permission_data.is_active is not None:
@@ -415,9 +346,6 @@ async def elevate_user_to_admin_route(
         )
         
         if result.get("success", False):
-            # Invalidate role cache for this user to ensure consistency
-            await invalidate_user_role_cache(user_id)
-            
             return JSONResponse({
                 "success": True,
                 "message": f"User '{target_user['username']}' has been elevated to temporary admin role",
@@ -480,9 +408,6 @@ async def revoke_admin_privileges_route(
         )
         
         if result.get("success", False):
-            # Invalidate role cache for this user to ensure consistency
-            await invalidate_user_role_cache(user_id)
-            
             return JSONResponse({
                 "success": True,
                 "message": f"Temporary admin privileges revoked from user '{target_user['username']}'",
@@ -577,15 +502,19 @@ async def get_all_user_permissions_route(
     try:
         permissions = await get_all_user_permissions()
         
-        # Enhance the response with role-based permission details
+        # Enhance the response with role-based permission details from database
         enhanced_permissions = []
         for perm in permissions:
             role = perm.get("role", "viewer")
-            role_permissions = {
-                "admin": ["read", "write", "execute", "delete"],
-                "manager": ["read", "write", "execute"],
-                "viewer": ["read", "execute"]
-            }.get(role, ["read"])
+            
+            # Get actual permissions from database for this role
+            from app.db.repositories import RolePermissionRepository
+            db_permissions = await RolePermissionRepository.get_by_role(role)
+            
+            # Extract permission names from database results
+            role_permissions = []
+            for db_perm in db_permissions:
+                role_permissions.append(db_perm["permission"])
             
             enhanced_permissions.append({
                 **perm,
@@ -635,11 +564,15 @@ async def get_user_permissions_route(
             })
         
         role = permissions.get("role", "viewer")
-        role_permissions = {
-            "admin": ["read", "write", "execute", "delete"],
-            "manager": ["read", "write", "execute"],
-            "viewer": ["read", "execute"]
-        }.get(role, ["read"])
+        
+        # Get actual permissions from database for this role
+        from app.db.repositories import RolePermissionRepository
+        db_permissions = await RolePermissionRepository.get_by_role(role)
+        
+        # Extract permission names from database results
+        role_permissions = []
+        for db_perm in db_permissions:
+            role_permissions.append(db_perm["permission"])
         
         return JSONResponse({
             "success": True,
@@ -1134,8 +1067,8 @@ async def test_admin_access_route(
 # 
 # ROLES:
 # - admin: Has all permissions by default (cannot be modified - always has read, write, delete, execute)
-# - manager: Can read/write/execute workflows, read users, read/write groups, read system
-# - viewer: Can only read workflows, users, groups, and system
+# - manager: Can read/write/execute workflows, read/write groups
+# - viewer: Can only read workflows and groups
 # 
 # PERMISSIONS:
 # - read: View/list resources
@@ -1145,9 +1078,7 @@ async def test_admin_access_route(
 # 
 # RESOURCE TYPES:
 # - workflow: Workflow management operations
-# - user: User management operations
 # - group: Group management operations
-# - system: System-level operations
 # 
 # IMPORTANT: Admin role permissions are immutable and always include all permissions on all resources.
 # Attempting to modify admin role permissions will result in an error.
@@ -1342,8 +1273,8 @@ async def add_role_permission_route(
             raise HTTPException(status_code=400, detail="Invalid permission. Must be read, write, delete, or execute")
         
         # Validate resource type
-        if permission_data.resource_type not in ["workflow", "user", "group", "system"]:
-            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, user, group, or system")
+        if permission_data.resource_type not in ["workflow", "group"]:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow or group")
         
         # Prevent modification of admin role permissions
         if permission_data.role == "admin":
@@ -1372,9 +1303,6 @@ async def add_role_permission_route(
         
         if not success:
             raise HTTPException(status_code=500, detail="Failed to add permission")
-        
-        # Invalidate role cache for all users since role permissions changed
-        await invalidate_user_role_cache()
         
         return JSONResponse({
             "success": True,
@@ -1423,8 +1351,8 @@ async def remove_role_permission_route(
             raise HTTPException(status_code=400, detail="Invalid permission. Must be read, write, delete, or execute")
         
         # Validate resource type
-        if permission_data.resource_type not in ["workflow", "user", "group", "system"]:
-            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, user, group, or system")
+        if permission_data.resource_type not in ["workflow", "group"]:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow or group")
         
         # Prevent modification of admin role permissions
         if permission_data.role == "admin":
@@ -1453,9 +1381,6 @@ async def remove_role_permission_route(
         
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove permission")
-        
-        # Invalidate role cache for all users since role permissions changed
-        await invalidate_user_role_cache()
         
         return JSONResponse({
             "success": True,
@@ -1524,25 +1449,18 @@ async def reset_role_permissions_route(
                 ("manager", "read", "workflow"),
                 ("manager", "write", "workflow"),
                 ("manager", "execute", "workflow"),
-                ("manager", "read", "user"),
                 ("manager", "read", "group"),
                 ("manager", "write", "group"),
-                ("manager", "read", "system"),
             ]
         elif role == "viewer":
             default_permissions = [
                 ("viewer", "read", "workflow"),
-                ("viewer", "read", "user"),
                 ("viewer", "read", "group"),
-                ("viewer", "read", "system"),
             ]
         
         # Add default permissions back
         for role_name, permission, resource_type in default_permissions:
             await RolePermissionRepository.add_permission(role_name, permission, resource_type)
-        
-        # Invalidate role cache for all users since role permissions changed
-        await invalidate_user_role_cache()
         
         return JSONResponse({
             "success": True,
@@ -1569,8 +1487,8 @@ async def reset_all_role_permissions_route(
     
     This will reset:
     - Admin role: All permissions on all resources
-    - Manager role: Read/write/execute on workflows, read on users, read/write on groups, read on system
-    - Viewer role: Read permissions on workflows, users, groups, and system
+    - Manager role: Read/write/execute on workflows, read/write on groups
+    - Viewer role: Read permissions on workflows and groups
     """
     try:
         # Additional security: Verify user role from auth token
@@ -1592,9 +1510,6 @@ async def reset_all_role_permissions_route(
                 status_code=500, 
                 detail="Failed to reset role permissions. Please check server logs for details."
             )
-        
-        # Invalidate role cache for all users since all role permissions changed
-        await invalidate_user_role_cache()
         
         # Get the updated permissions to return in response
         from app.db.repositories import RolePermissionRepository

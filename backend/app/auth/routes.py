@@ -29,8 +29,6 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str
     user: dict
-    role: str
-    role_type: str
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
@@ -124,6 +122,40 @@ async def change_password(
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):
     """Get current user information."""
     return current_user
+
+@router.get("/me/role", response_model=dict)
+async def get_current_user_role_info(current_user: dict = Depends(get_current_user)):
+    """
+    Get current user's role and admin information from JWT token.
+    This endpoint extracts role information that was embedded in the JWT token.
+    
+    Security: No database lookup - only extracts information from JWT claims.
+    """
+    try:
+        # Extract role and admin information from JWT claims
+        user_role = current_user.get("role", "viewer")
+        is_admin = current_user.get("is_admin", False)
+        
+        # Determine role type
+        if is_admin:
+            role_type = "permanent_admin"
+        elif user_role == "admin":
+            role_type = "temporary_admin"
+        else:
+            role_type = "regular_user"
+        
+        return {
+            "user_id": current_user["id"],
+            "username": current_user["username"],
+            "role": user_role,
+            "role_type": role_type,
+            "is_admin": is_admin,
+            "note": "Role information extracted from JWT token claims"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user role info: {e}")
+        raise HTTPException(status_code=500, detail="Error extracting role information from token")
 
 
 

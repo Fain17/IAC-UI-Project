@@ -724,11 +724,21 @@ class AuthService:
         # is_admin=false means role can be viewer, manager, or temporary admin
         user_role = user_permission.get("role", "viewer") if user_permission else "viewer"
         
-        # Include role in JWT claims for faster verification
+        # Include role and permissions in JWT claims for granular access control
         # Note: is_admin is included for reference but NOT used for role verification
+        # Get actual permissions from database instead of hardcoded model
+        from app.db.repositories import RolePermissionRepository
+        db_permissions = await RolePermissionRepository.get_by_role(user_role)
+        
+        # Extract permission names from database results
+        user_permissions = []
+        for perm in db_permissions:
+            user_permissions.append(perm["permission"])
+        
         jwt_data = {
             "sub": str(user_data["id"]),
             "role": user_role,  # This is the actual role from permissions
+            "permissions": user_permissions,  # List of permissions from database
             "is_admin": user_data.get("is_admin", False)  # Reference only - not used for role checks
         }
         
@@ -756,9 +766,7 @@ class AuthService:
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",
-            "user": user_data,
-            "role": user_role,  # Explicitly include role for immediate frontend access
-            "role_type": "permanent_admin" if user_data.get("is_admin", False) else "temporary_admin" if user_role == "admin" else "regular_user"
+            "user": user_data
         }
 
     async def revoke_all_refresh_tokens(self, user_id: str) -> bool:
