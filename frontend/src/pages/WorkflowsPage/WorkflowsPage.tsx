@@ -4,7 +4,7 @@ import tokenManager from '../../utils/tokenManager';
 import WorkflowList from './components/WorkflowList';
 import CreateWorkflow from './components/CreateWorkflow';
 import WorkflowSchedules from '../../components/WorkflowSchedules';
-import { getAllWorkflows, Workflow } from '../../api';
+import { getWorkflows, Workflow } from '../../api';
 import './WorkflowsPage.css';
 
 type SubTab = 'list' | 'create' | 'history' | 'automate';
@@ -30,7 +30,7 @@ const WorkflowsPage: React.FC = () => {
   const fetchWorkflows = async () => {
     try {
       setWorkflowsLoading(true);
-      const response = await getAllWorkflows();
+      const response = await getWorkflows();
       if (response.data.success) {
         setWorkflows(response.data.workflows || []);
       }
