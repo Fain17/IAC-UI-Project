@@ -726,19 +726,45 @@ class AuthService:
         
         # Include role and permissions in JWT claims for granular access control
         # Note: is_admin is included for reference but NOT used for role verification
-        # Get actual permissions from database instead of hardcoded model
+        # Get actual permissions from database, grouped by resource type
         from app.db.repositories import RolePermissionRepository
-        db_permissions = await RolePermissionRepository.get_by_role(user_role)
+        grouped_permissions = await RolePermissionRepository.get_by_role_grouped(user_role)
         
-        # Extract permission names from database results
-        user_permissions = []
-        for perm in db_permissions:
-            user_permissions.append(perm["permission"])
+        # Debug logging to see what's happening
+        logger.info(f"User {user_data['id']} - user_permission: {user_permission}")
+        logger.info(f"User {user_data['id']} - user_role: {user_role}")
+        logger.info(f"User {user_data['id']} - grouped_permissions: {grouped_permissions}")
+        
+        # Fallback: If no permissions found in database, provide default permissions based on role
+        if not grouped_permissions:
+            logger.warning(f"No permissions found in database for role '{user_role}', using default permissions")
+            if user_role == "admin":
+                grouped_permissions = {
+                    "workflow": ["read", "write", "execute", "delete", "create", "assign"],
+                    "group": ["read", "write", "execute", "delete"]
+                }
+            elif user_role == "manager":
+                grouped_permissions = {
+                    "workflow": ["read", "write", "execute", "create"],
+                    "group": ["read", "write"]
+                }
+            elif user_role == "viewer":
+                grouped_permissions = {
+                    "workflow": ["read", "execute"],
+                    "group": ["read"]
+                }
+            else:
+                # Unknown role, default to viewer
+                user_role = "viewer"
+                grouped_permissions = {
+                    "workflow": ["read", "execute"],
+                    "group": ["read"]
+                }
         
         jwt_data = {
             "sub": str(user_data["id"]),
             "role": user_role,  # This is the actual role from permissions
-            "permissions": user_permissions,  # List of permissions from database
+            "permissions": grouped_permissions,  # Dict of permissions grouped by resource type
             "is_admin": user_data.get("is_admin", False)  # Reference only - not used for role checks
         }
         
