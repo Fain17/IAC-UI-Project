@@ -1,4 +1,3 @@
-import { getCurrentUserRole, UserRoleResponse } from '../api';
 import tokenManager from './tokenManager';
 
 interface VerifiedUserRole {
@@ -26,8 +25,8 @@ class RoleVerificationService {
   }
 
   /**
-   * Verify user role from server and validate against local storage
-   * This follows the principle of "trust but verify" with server-side validation
+   * Verify user role from JWT claims instead of server API call
+   * This follows the principle of "trust but verify" with JWT validation
    */
   async verifyUserRole(): Promise<VerifiedUserRole | null> {
     try {
@@ -45,47 +44,61 @@ class RoleVerificationService {
         return cached;
       }
 
-      // Fetch fresh role data from server
-      console.log('Fetching fresh role verification from server');
-      const response = await getCurrentUserRole();
+      // Get role from JWT claims instead of server API call
+      console.log('Getting role from JWT claims');
+      const token = tokenManager.getToken();
       
-      if (!response.data.success) {
-        console.error('Role verification failed:', response.data);
+      if (!token) {
+        console.error('No JWT token found');
         return null;
       }
 
-      const serverData = response.data;
-      
-      // Validate server response integrity
-      if (!this.validateServerResponse(serverData)) {
-        console.error('Invalid server response format');
+      try {
+        // Decode JWT token to get role and permissions from claims
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        
+        // Validate JWT payload structure
+        if (!this.validateJWTPayload(payload)) {
+          console.error('Invalid JWT payload format');
+          return null;
+        }
+
+        // Cross-validate with local storage data
+        const validationResult = this.crossValidateRole(localUser, payload);
+        
+        if (!validationResult.isValid) {
+          console.warn('Role validation failed:', validationResult.reason);
+          // Clear potentially compromised data
+          this.clearCache();
+          return null;
+        }
+
+        // Create verified role object from JWT claims
+        const verifiedRole: VerifiedUserRole = {
+          userId: localUser.id,
+          role: payload.role || payload.user_role || 'viewer',
+          permissions: payload.permissions || payload.user_permissions || {
+            create: false,
+            read: false,
+            write: false,
+            delete: false,
+            execute: false,
+            assign: false
+          },
+          lastVerified: Date.now(),
+          isValid: true
+        };
+
+        // Cache the verified role
+        this.cacheVerification(verifiedRole);
+        
+        console.log('Role verification successful from JWT:', verifiedRole);
+        return verifiedRole;
+
+      } catch (jwtError) {
+        console.error('Failed to decode JWT token:', jwtError);
         return null;
       }
-
-      // Cross-validate with local storage data
-      const validationResult = this.crossValidateRole(localUser, serverData);
-      
-      if (!validationResult.isValid) {
-        console.warn('Role validation failed:', validationResult.reason);
-        // Clear potentially compromised data
-        this.clearCache();
-        return null;
-      }
-
-      // Create verified role object
-      const verifiedRole: VerifiedUserRole = {
-        userId: serverData.user_id,
-        role: serverData.user_role,
-        permissions: serverData.permissions,
-        lastVerified: Date.now(),
-        isValid: true
-      };
-
-      // Cache the verified role
-      this.cacheVerification(verifiedRole);
-      
-      console.log('Role verification successful:', verifiedRole);
-      return verifiedRole;
 
     } catch (error) {
       console.error('Error during role verification:', error);
@@ -94,60 +107,43 @@ class RoleVerificationService {
   }
 
   /**
-   * Cross-validate server response with local storage data
+   * Cross-validate JWT claims with local storage data
    * This prevents token manipulation and ensures data consistency
    */
-  private crossValidateRole(localUser: any, serverData: UserRoleResponse): { isValid: boolean; reason?: string } {
+  private crossValidateRole(localUser: any, jwtPayload: any): { isValid: boolean; reason?: string } {
     // Validate user ID consistency
-    if (localUser.id !== serverData.user_id) {
+    if (localUser.id !== jwtPayload.sub && localUser.id !== jwtPayload.user_id) {
       return { isValid: false, reason: 'User ID mismatch' };
     }
 
     // Validate role format
-    if (!serverData.user_role || typeof serverData.user_role !== 'string') {
+    const role = jwtPayload.role || jwtPayload.user_role;
+    if (!role || typeof role !== 'string') {
       return { isValid: false, reason: 'Invalid role format' };
     }
 
     // Validate permissions structure
-    if (!serverData.permissions || typeof serverData.permissions !== 'object') {
+    const permissions = jwtPayload.permissions || jwtPayload.user_permissions;
+    if (!permissions || typeof permissions !== 'object') {
       return { isValid: false, reason: 'Invalid permissions format' };
-    }
-
-    // Validate required permission fields
-    const requiredPermissions = ['create', 'read', 'write', 'delete', 'execute', 'assign'];
-    for (const permission of requiredPermissions) {
-      if (typeof serverData.permissions[permission as keyof typeof serverData.permissions] !== 'boolean') {
-        return { isValid: false, reason: `Invalid permission format: ${permission}` };
-      }
-    }
-
-    // Validate raw permission data
-    if (!serverData.raw_permission_data || 
-        !serverData.raw_permission_data.id || 
-        !serverData.raw_permission_data.user_id || 
-        !serverData.raw_permission_data.role) {
-      return { isValid: false, reason: 'Invalid raw permission data' };
     }
 
     return { isValid: true };
   }
 
   /**
-   * Validate server response format and integrity
+   * Validate JWT payload format and integrity
    */
-  private validateServerResponse(data: any): boolean {
+  private validateJWTPayload(payload: any): boolean {
     return (
-      data &&
-      typeof data === 'object' &&
-      typeof data.success === 'boolean' &&
-      typeof data.user_id === 'string' &&
-      typeof data.user_role === 'string' &&
-      data.permissions &&
-      typeof data.permissions === 'object' &&
-      data.raw_permission_data &&
-      typeof data.raw_permission_data === 'object'
+      payload &&
+      typeof payload === 'object' &&
+      (payload.role || payload.user_role) &&
+      (payload.permissions || payload.user_permissions)
     );
   }
+
+
 
   /**
    * Check if user has specific permission

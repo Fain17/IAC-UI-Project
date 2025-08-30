@@ -44,25 +44,43 @@ const AdminProfilePage: React.FC = () => {
         // Load user info from TokenManager
         const user = tokenManager.getUser();
         if (user) {
-          // Fetch role from API
-          const response = await axios.get('http://localhost:8000/workflow/debug/user-role', {
-            headers: {
-              Authorization: `Bearer ${tokenManager.getToken()}`
+          // Get role from JWT claims instead of API call
+          const token = tokenManager.getToken();
+          if (token) {
+            try {
+              // Decode JWT token to get role from claims
+              const payload = JSON.parse(atob(token.split('.')[1]));
+              const role = payload.role || payload.user_role || 'User';
+              
+              setAdminInfo({
+                username: user.username || '',
+                email: user.email || '',
+                role: role
+              });
+              setNewUsername(user.username || '');
+            } catch (jwtError) {
+              console.error('Failed to decode JWT token:', jwtError);
+              // Fallback if JWT decoding fails
+              setAdminInfo({
+                username: user.username || '',
+                email: user.email || '',
+                role: 'User'
+              });
+              setNewUsername(user.username || '');
             }
-          });
-          
-          if (response.data.success) {
+          } else {
+            // Fallback if no token
             setAdminInfo({
               username: user.username || '',
               email: user.email || '',
-              role: response.data.user_role
+              role: 'User'
             });
             setNewUsername(user.username || '');
           }
         }
       } catch (error) {
         console.error('Failed to load user info:', error);
-        // Set default role if API fails
+        // Set default role if everything fails
         const user = tokenManager.getUser();
         if (user) {
           setAdminInfo({

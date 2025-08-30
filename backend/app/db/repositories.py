@@ -537,6 +537,31 @@ class RolePermissionRepository:
         except Exception as e:
             logger.error(f"Error getting permissions for role {role} and resource {resource_type}: {e}")
             return []
+
+    @staticmethod
+    async def get_by_role_grouped(role: str) -> Dict[str, List[str]]:
+        """Get permissions for a specific role, grouped by resource type."""
+        if not db_service.client:
+            return {}
+        try:
+            result = await db_service.client.execute("""
+                SELECT permission, resource_type
+                FROM role_permissions
+                WHERE role = ?
+                ORDER BY resource_type, permission
+            """, [role])
+            
+            grouped_permissions = {}
+            for row in result.rows:
+                permission, resource_type = row[0], row[1]
+                if resource_type not in grouped_permissions:
+                    grouped_permissions[resource_type] = []
+                grouped_permissions[resource_type].append(permission)
+            
+            return grouped_permissions
+        except Exception as e:
+            logger.error(f"Error getting grouped permissions for role {role}: {e}")
+            return {}
     
     @staticmethod
     async def add_permission(role: str, permission: str, resource_type: str) -> bool:

@@ -438,29 +438,37 @@ export interface AdminGroupUser {
   is_admin: boolean;
 }
 
+// User Group Management APIs - Updated to use new routes
 export const createAdminGroup = (group: { name: string; description?: string }): Promise<AxiosResponse<AdminGroup>> =>
-  API.post('/admin/groups', group);
+  API.post('/groups', group);
 
 export const getAdminGroups = (): Promise<AxiosResponse<{ groups: AdminGroup[] } | AdminGroup[]>> =>
-  API.get('/admin/groups');
+  API.get('/groups');
 
 export const getUserGroups = (userId: string): Promise<AxiosResponse<{ groups: AdminGroup[] } | AdminGroup[]>> =>
-  API.get(`/admin/users/${userId}/groups`);
+  API.get(`/users/${userId}/groups`);
 
 export const addUserToGroup = (userId: string, groupId: string): Promise<AxiosResponse> =>
-  API.post(`/admin/users/${userId}/groups/${groupId}`);
+  API.post(`/users/${userId}/groups/${groupId}`);
 
 export const removeUserFromGroup = (userId: string, groupId: string): Promise<AxiosResponse> =>
-  API.delete(`/admin/users/${userId}/groups/${groupId}`);
+  API.delete(`/users/${userId}/groups/${groupId}`);
 
 export const getGroupUsers = (groupId: string): Promise<AxiosResponse<{ users: AdminGroupUser[] } | AdminGroupUser[]>> =>
-  API.get(`/admin/groups/${groupId}/users`);
+  API.get(`/groups/${groupId}/users`);
 
 export const deleteAdminGroup = (groupId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
-  API.delete(`/admin/groups/${groupId}`);
+  API.delete(`/groups/${groupId}`);
 
 export const updateAdminGroup = (groupId: string, groupData: { name: string; description?: string }): Promise<AxiosResponse<AdminGroup>> =>
-  API.put(`/admin/groups/${groupId}`, groupData);
+  API.put(`/groups/${groupId}`, groupData);
+
+// Additional group functions based on your requirements
+export const getGroup = (groupId: string): Promise<AxiosResponse<AdminGroup>> =>
+  API.get(`/groups/${groupId}`);
+
+export const getGroupWorkflows = (groupId: string): Promise<AxiosResponse<{ workflows: any[] }>> =>
+  API.get(`/groups/${groupId}/workflows`);
 
 // Workflow Sharing APIs
 export const shareWorkflowWithGroup = (workflowId: string, groupId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
@@ -589,13 +597,13 @@ export const updateWorkflow = (workflowId: string, workflowData: { name?: string
 export const deleteWorkflow = (workflowId: string): Promise<AxiosResponse<{ success: boolean; message: string }>> =>
   API.delete(`/workflow/${workflowId}`); 
 
-// Get all workflows for admin
+// Get all workflows for automation (accessible to users with workflow write and execute access)
 export const getAllWorkflows = (): Promise<AxiosResponse<{
   success: boolean;
   workflows: Workflow[];
   count: number;
 }>> => 
-  API.get('/admin/workflows');
+  API.get('/workflow/list');
 
 // Workflow Automation Schedules API
 export interface WorkflowSchedule {
@@ -884,30 +892,7 @@ export const getRolePermissionsByRole = (role: string): Promise<AxiosResponse<{
 }>> => 
   API.get(`/admin/role-permissions/${role}`);
 
-// Get current user role and permissions from token
-export interface UserRoleResponse {
-  success: boolean;
-  user_id: string;
-  user_role: string;
-  permissions: {
-    create: boolean;
-    read: boolean;
-    write: boolean;
-    delete: boolean;
-    execute: boolean;
-    assign: boolean;
-  };
-  raw_permission_data: {
-    id: number;
-    user_id: string;
-    role: string;
-    created_at: string;
-    updated_at: string;
-  };
-}
-
-export const getCurrentUserRole = (): Promise<AxiosResponse<UserRoleResponse>> => 
-  API.get('/workflow/debug/user-role');
+// User role and permissions are now retrieved from JWT claims instead of API calls
 
 // Reset role permissions for a specific role
 export const resetRolePermissions = (role: string): Promise<AxiosResponse<{
@@ -943,6 +928,19 @@ export const removeRolePermission = (data: RemoveRolePermissionRequest): Promise
   message: string;
 }>> =>
   API.delete('/admin/role-permissions', { data });
+
+// Remove multiple role permissions
+export interface RemoveMultipleRolePermissionsRequest {
+  role: string;
+  permissions: string[];
+  resource_type: string;
+}
+
+export const removeMultipleRolePermissions = (data: RemoveMultipleRolePermissionsRequest): Promise<AxiosResponse<{
+  success: boolean;
+  message: string;
+}>> =>
+  API.delete('/admin/role-permissions/multiple', { data });
 
 // Get Schedule Status
 export interface ScheduleStatus {

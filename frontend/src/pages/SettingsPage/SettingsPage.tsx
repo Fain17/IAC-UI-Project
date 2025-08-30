@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import tokenManager from '../../utils/tokenManager';
-import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequest, AdminUsersResponse, updateUserPermissionsNew as updateUserPermissionsAPI, UpdateUserPermissionsRequest, deleteUser, updateUserActiveStatus, getAllUsersPermissionsNew, getAdminGroups, createAdminGroup, addUserToGroup, removeUserFromGroup, getUserGroups, AdminGroup, AdminGroupUser, getGroupUsers, deleteAdminGroup, updateAdminGroup, getRolePermissions, getRolePermissionsByRole, resetRolePermissions, addRolePermission, removeRolePermission, AddRolePermissionRequest, RemoveRolePermissionRequest, RolePermission } from '../../api';
+import { getAdminUsers, createAdminUser, getAdminUser, AdminUser, CreateUserRequest, AdminUsersResponse, updateUserPermissionsNew as updateUserPermissionsAPI, UpdateUserPermissionsRequest, deleteUser, updateUserActiveStatus, getAllUsersPermissionsNew, getAdminGroups, createAdminGroup, addUserToGroup, removeUserFromGroup, getUserGroups, AdminGroup, AdminGroupUser, getGroupUsers, deleteAdminGroup, updateAdminGroup, getRolePermissions, getRolePermissionsByRole, resetRolePermissions, addRolePermission, removeRolePermission, removeMultipleRolePermissions, AddRolePermissionRequest, RemoveRolePermissionRequest, RemoveMultipleRolePermissionsRequest, RolePermission } from '../../api';
 import './SettingsPage.css';
 
 interface User {
@@ -83,23 +83,31 @@ const SettingsPage: React.FC = () => {
           setUserUsername(user.username || '');
           setUserEmail(user.email || '');
           
-          // Fetch role from API
-          const response = await fetch('http://localhost:8000/workflow/debug/user-role', {
-            headers: {
-              Authorization: `Bearer ${tokenManager.getToken()}`
+          // Get role from JWT claims instead of API call
+          const token = tokenManager.getToken();
+          if (token) {
+            try {
+              // Decode JWT token to get role and permissions from claims
+              const payload = JSON.parse(atob(token.split('.')[1]));
+              const role = payload.role || payload.user_role || 'viewer';
+              const permissions = payload.permissions || payload.user_permissions || {};
+              
+              setUserRole(role);
+              setUserPermissions(permissions);
+            } catch (jwtError) {
+              console.error('Failed to decode JWT token:', jwtError);
+              setUserRole('viewer');
+              setUserPermissions({});
             }
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success) {
-              setUserRole(data.user_role);
-              setUserPermissions(data.permissions);
-            }
+          } else {
+            setUserRole('viewer');
+            setUserPermissions({});
           }
         }
       } catch (error) {
         console.error('Failed to load user info:', error);
+        setUserRole('viewer');
+        setUserPermissions({});
       }
     };
 
@@ -444,6 +452,41 @@ const SettingsPage: React.FC = () => {
       await loadRoles();
     } catch (error: any) {
       setMessage({ type: 'error', text: 'Failed to remove role permission: ' + (error.response?.data?.detail || error.message) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Remove all role permissions for a specific role and resource type
+  const handleRemoveAllRolePermissions = async (role: string, resourceType: string) => {
+    if (!window.confirm(`Are you sure you want to remove all permissions for "${role}" role on "${resourceType}" resource?`)) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Find the role permission entry to get all permissions
+      const rolePermissionEntry = rolePermissions.find(rp => rp.role === role && rp.resource_type === resourceType);
+      
+      if (!rolePermissionEntry) {
+        setMessage({ type: 'error', text: 'No permissions found for this role and resource type' });
+        return;
+      }
+
+      // Use the new API to remove all permissions at once
+      await removeMultipleRolePermissions({
+        role,
+        permissions: rolePermissionEntry.permissions,
+        resource_type: resourceType
+      });
+      
+      setMessage({ type: 'success', text: 'All role permissions removed successfully!' });
+      
+      // Refresh the data
+      await loadRoles();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Failed to remove role permissions: ' + (error.response?.data?.detail || error.message) });
     } finally {
       setLoading(false);
     }
@@ -824,7 +867,7 @@ const SettingsPage: React.FC = () => {
                              user.role === 'viewer' ? 'Viewer' : 
                              user.role || 'User'}
                           </span></td>
-                          <td>{user.groups && user.groups.length > 0 ? user.groups.map(g => g.name).join(', ') : 'No groups'}</td>
+                          <td>{user.groups && user.groups.length > 0 ? user.groups.join(', ') : 'No groups'}</td>
                           <td>
                             <span className={`status-badge ${user.is_active ? 'active' : 'inactive'}`}>
                               {user.is_active ? 'Active' : 'Inactive'}
@@ -1018,7 +1061,7 @@ const SettingsPage: React.FC = () => {
                               {rolePerm.permissions.map((permission, permIndex) => (
                                 <span key={permIndex} className={`permission-badge ${permission}`}>
                                   {permission}
-                                  {userRole === 'admin' && (
+                                  {userRole === 'admin' && rolePerm.role !== 'admin' && (
                                     <button
                                       onClick={() => handleRemoveRolePermission(rolePerm.role, permission, rolePerm.resource_type)}
                                       disabled={loading}
@@ -1042,10 +1085,10 @@ const SettingsPage: React.FC = () => {
                             </div>
                           </td>
                           <td>{new Date(rolePerm.updated_at).toLocaleDateString()}</td>
-                          {userRole === 'admin' && (
+                          {userRole === 'admin' && rolePerm.role !== 'admin' && (
                             <td>
                               <button
-                                onClick={() => handleRemoveRolePermission(rolePerm.role, 'all', rolePerm.resource_type)}
+                                onClick={() => handleRemoveAllRolePermissions(rolePerm.role, rolePerm.resource_type)}
                                 disabled={loading}
                                 style={{
                                   padding: '4px 8px',
@@ -1407,8 +1450,7 @@ const SettingsPage: React.FC = () => {
                 >
                   <option value="">Select Resource Type</option>
                   <option value="group">Group</option>
-                  <option value="system">System</option>
-                  <option value="user">User</option>
+                  <option value="config">Config</option>
                   <option value="workflow">Workflow</option>
                 </select>
               </div>
@@ -1423,8 +1465,13 @@ const SettingsPage: React.FC = () => {
                   <option value="">Select Permission</option>
                   <option value="read">Read</option>
                   <option value="write">Write</option>
-                  <option value="execute">Execute</option>
                   <option value="delete">Delete</option>
+                  {addPermissionForm.resource_type === 'workflow' && (
+                    <>
+                      <option value="execute">Execute</option>
+                      <option value="create">Create</option>
+                    </>
+                  )}
                 </select>
               </div>
             </div>

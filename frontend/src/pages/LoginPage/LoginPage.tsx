@@ -38,7 +38,7 @@ const LoginPage: React.FC = () => {
             id: response.data.user.id,
             username: response.data.user.username,
             email: response.data.user.email
-            // Role will be fetched dynamically from /workflow/debug/user-role endpoint
+            // Role and permissions are now included in JWT claims
           }
         );
       } else {
@@ -49,7 +49,7 @@ const LoginPage: React.FC = () => {
             id: response.data.user.id,
             username: response.data.user.username,
             email: response.data.user.email
-            // Role will be fetched dynamically from /workflow/debug/user-role endpoint
+            // Role and permissions are now included in JWT claims
           }
         );
       }

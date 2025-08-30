@@ -3,10 +3,9 @@ from fastapi.responses import JSONResponse
 from app.services.user_management_service import (
     get_all_users, get_user_by_id, create_admin_user, 
     delete_admin_user, update_user_active_status, get_user_permissions, 
-    get_user_groups, assign_user_to_group, remove_user_from_group, update_user_permissions,
-    get_all_user_permissions, create_user_group, get_all_user_groups, delete_user_group, update_user_group
+    update_user_permissions, get_all_user_permissions
 )
-from app.auth.dependencies import get_current_admin_user, get_current_user
+from app.auth.dependencies import get_current_admin_user, get_current_user, verify_permission
 from app.db.models import AdminUserCreate, AdminUserPermissionUpdate, UserGroupCreate, UserGroupUpdate, UserRole
 from typing import List, Optional
 import logging
@@ -76,6 +75,11 @@ class RolePermissionRemove(BaseModel):
     permission: str  # read, write, delete, execute
     resource_type: str  # workflow, user, group, system, etc.
 
+class RolePermissionRemoveMultiple(BaseModel):
+    role: str  # admin, manager, viewer
+    permissions: List[str]  # list of permissions to remove: ["read", "write", "delete"]
+    resource_type: str  # workflow, user, group, system, etc.
+
 class RolePermissionResponse(BaseModel):
     role: str
     permission: str
@@ -123,6 +127,8 @@ async def check_user_permission(user_id: str, permission: str, resource_type: st
         return False
 
 router = APIRouter(prefix="/admin")
+
+
 
 # Admin Routes - Access Control
 # All routes in this router require admin role in permissions (either permanent or temporary admin)
@@ -588,53 +594,7 @@ async def get_user_permissions_route(
         logger.error(f"Error getting user permissions: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/users/{user_id}/groups", tags=["Admin User Groups"])
-async def get_user_groups_route(
-    user_id: str,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Get user's group assignments (admin only).
-    Returns a list of groups the user belongs to.
-    """
-    groups = await get_user_groups(user_id)
-    return JSONResponse({
-        "user_id": user_id,
-        "groups": groups,
-        "count": len(groups)
-    })
 
-@router.post("/users/{user_id}/groups/{group_id}", tags=["Admin User Groups"])
-async def assign_user_to_group_route(
-    user_id: str,
-    group_id: str,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Assign a user to a group (admin only).
-    """
-    result = await assign_user_to_group(user_id, group_id)
-    
-    if result["success"]:
-        return JSONResponse(result)
-    else:
-        raise HTTPException(status_code=400, detail=result["error"])
-
-@router.delete("/users/{user_id}/groups/{group_id}", tags=["Admin User Groups"])
-async def remove_user_from_group_route(
-    user_id: str,
-    group_id: str,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Remove a user from a group (admin only).
-    """
-    result = await remove_user_from_group(user_id, group_id)
-    
-    if result["success"]:
-        return JSONResponse(result)
-    else:
-        raise HTTPException(status_code=400, detail=result["error"])
 
 
 # User Statistics
@@ -671,183 +631,7 @@ async def get_user_stats_route(current_user: dict = Depends(get_current_admin_us
         "permission_distribution": permission_stats
     })
 
-# Group Management Endpoints
-@router.post("/groups", tags=["Admin User Groups"])
-async def create_group_route(
-    group_data: UserGroupCreate,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Create a new user group (admin only).
-    
-    Example request body:
-    {
-        "name": "Developers",
-        "description": "Development team members"
-    }
-    """
-    result = await create_user_group(
-        name=group_data.name,
-        description=group_data.description
-    )
-    
-    if result["success"]:
-        return JSONResponse(result, status_code=201)
-    else:
-        raise HTTPException(status_code=400, detail=result["error"])
 
-@router.get("/groups", tags=["Admin User Groups"])
-async def get_all_groups_route(
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Get all user groups (admin only).
-    Returns a list of all groups in the system.
-    """
-    groups = await get_all_user_groups()
-    return JSONResponse({
-        "groups": groups,
-        "count": len(groups)
-    })
-
-@router.get("/groups/{group_id}", tags=["Admin User Groups"])
-async def get_group_route(
-    group_id: str,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Get a specific user group by ID (admin only).
-    Returns detailed group information.
-    """
-    try:
-        from app.db.repositories import UserGroupRepository
-        group = await UserGroupRepository.get_by_id(group_id)
-        
-        if not group:
-            raise HTTPException(status_code=404, detail="Group not found")
-        
-        # Get users in this group
-        from app.services.user_management_service import get_group_users
-        users = await get_group_users(group_id)
-        
-        group_data = {
-            **group,
-            "users": users,
-            "user_count": len(users)
-        }
-        
-        return JSONResponse({
-            "success": True,
-            "group": group_data
-        })
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting group {group_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") 
-
-@router.get("/groups/{group_id}/workflows", tags=["Admin"])
-async def get_group_workflows_route(
-    group_id: str,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    List workflows created by members of the specified group (admin only).
-    """
-    try:
-        workflows = await WorkflowRepository.get_all_by_user_groups(user_id=0, group_id=group_id)
-        return JSONResponse({
-            "success": True,
-            "group_id": group_id,
-            "workflows": workflows,
-            "count": len(workflows)
-        })
-    except Exception as e:
-        logger.error(f"Error listing workflows for group {group_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") 
-
-@router.get("/groups/{group_id}/users", tags=["Admin User Groups"])
-async def get_group_users_list_route(
-    group_id: str,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Get all users present in a specific group (admin only).
-    Returns a list of users assigned to the specified group.
-    """
-    try:
-        from app.services.user_management_service import get_group_users
-        users = await get_group_users(group_id)
-        
-        return JSONResponse({
-            "success": True,
-            "group_id": group_id,
-            "users": users,
-            "count": len(users)
-        })
-    except Exception as e:
-        logger.error(f"Error getting users for group {group_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.delete("/groups/{group_id}", tags=["Admin User Groups"])
-async def delete_group_route(
-    group_id: str,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Delete a user group (admin only).
-    This will also remove all user assignments and workflow shares for this group.
-    """
-    try:
-        result = await delete_user_group(group_id)
-        
-        if result["success"]:
-            return JSONResponse(result)
-        else:
-            raise HTTPException(status_code=400, detail=result["error"])
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting group {group_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.put("/groups/{group_id}", tags=["Admin User Groups"])
-async def update_group_route(
-    group_id: str,
-    group_data: UserGroupUpdate,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    """
-    Update a user group (admin only).
-    Updates the name and/or description of an existing group.
-    
-    Example request body:
-    {
-        "name": "New Group Name",
-        "description": "Updated group description"
-    }
-    
-    Both fields are optional - only provided fields will be updated.
-    """
-    try:
-        result = await update_user_group(
-            group_id=group_id,
-            name=group_data.name,
-            description=group_data.description
-        )
-        
-        if result["success"]:
-            return JSONResponse(result)
-        else:
-            raise HTTPException(status_code=400, detail=result["error"])
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating group {group_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/workflows", tags=["Admin Workflows"])
 async def get_all_workflows_route(
@@ -1254,8 +1038,8 @@ async def add_role_permission_route(
     Note: Admin role permissions cannot be modified as they have all permissions by default.
     """
     try:
-        # Additional security: Verify user role from auth token
-        user_role = await get_user_role_from_token(current_user)
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
         if user_role != "admin":
             raise HTTPException(
                 status_code=403,
@@ -1268,13 +1052,22 @@ async def add_role_permission_route(
         if permission_data.role not in ["admin", "manager", "viewer"]:
             raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
         
-        # Validate permission
-        if permission_data.permission not in ["read", "write", "delete", "execute"]:
-            raise HTTPException(status_code=400, detail="Invalid permission. Must be read, write, delete, or execute")
+        # Validate permission based on resource type
+        valid_permissions = {
+            "workflow": ["read", "write", "delete", "execute", "create"],
+            "group": ["read", "write", "delete"],
+            "config": ["read", "write", "delete"]
+        }
         
-        # Validate resource type
-        if permission_data.resource_type not in ["workflow", "group"]:
-            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow or group")
+        if permission_data.resource_type not in valid_permissions:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, group, or config")
+        
+        if permission_data.permission not in valid_permissions[permission_data.resource_type]:
+            valid_perms = ", ".join(valid_permissions[permission_data.resource_type])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid permission for {permission_data.resource_type} resource. Must be one of: {valid_perms}"
+            )
         
         # Prevent modification of admin role permissions
         if permission_data.role == "admin":
@@ -1332,8 +1125,8 @@ async def remove_role_permission_route(
     Note: Admin role permissions cannot be modified as they have all permissions by default.
     """
     try:
-        # Additional security: Verify user role from auth token
-        user_role = await get_user_role_from_token(current_user)
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
         if user_role != "admin":
             raise HTTPException(
                 status_code=403,
@@ -1346,13 +1139,205 @@ async def remove_role_permission_route(
         if permission_data.role not in ["admin", "manager", "viewer"]:
             raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
         
-        # Validate permission
-        if permission_data.permission not in ["read", "write", "delete", "execute"]:
-            raise HTTPException(status_code=400, detail="Invalid permission. Must be read, write, delete, or execute")
+        # Validate permission based on resource type
+        valid_permissions = {
+            "workflow": ["read", "write", "delete", "execute", "create"],
+            "group": ["read", "write", "delete"],
+            "config": ["read", "write", "delete"]
+        }
         
-        # Validate resource type
-        if permission_data.resource_type not in ["workflow", "group"]:
-            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow or group")
+        if permission_data.resource_type not in valid_permissions:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, group, or config")
+        
+        if permission_data.permission not in valid_permissions[permission_data.resource_type]:
+            valid_perms = ", ".join(valid_permissions[permission_data.resource_type])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid permission for {permission_data.resource_type} resource. Must be one of: {valid_perms}"
+            )
+        
+        # Prevent modification of admin role permissions
+        if permission_data.role == "admin":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot modify admin role permissions. Admin role has all permissions by default."
+            )
+        
+        # Check if permission exists
+        if not await RolePermissionRepository.has_permission(
+            permission_data.role, 
+            permission_data.permission, 
+            permission_data.resource_type
+        ):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Permission {permission_data.permission} does not exist for role {permission_data.role} on resource {permission_data.resource_type}"
+            )
+        
+        # Remove the permission
+        success = await RolePermissionRepository.remove_permission(
+            permission_data.role,
+            permission_data.permission,
+            permission_data.resource_type
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to remove permission")
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Permission {permission_data.permission} removed from role {permission_data.role} for resource {permission_data.resource_type}",
+            "removed_permission": {
+                "role": permission_data.role,
+                "permission": permission_data.permission,
+                "resource_type": permission_data.resource_type
+            }
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing permission: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.delete("/role-permissions/multiple", tags=["Admin Role Permissions"])
+async def remove_multiple_role_permissions_route(
+    permission_data: RolePermissionRemoveMultiple,
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Remove multiple permissions from a role (admin only).
+    This allows admins to remove multiple permissions at once.
+    
+    Example request body:
+    {
+        "role": "manager",
+        "permissions": ["read", "write", "delete"],
+        "resource_type": "config"
+    }
+    
+    Note: Admin role permissions cannot be modified as they have all permissions by default.
+    """
+    try:
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to manage role permissions."
+            )
+        
+        from app.db.repositories import RolePermissionRepository
+        
+        # Validate role
+        if permission_data.role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        # Validate permission based on resource type
+        valid_permissions = {
+            "workflow": ["read", "write", "delete", "execute", "create"],
+            "group": ["read", "write", "delete"],
+            "config": ["read", "write", "delete"]
+        }
+        
+        if permission_data.resource_type not in valid_permissions:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, group, or config")
+        
+        # Validate all permissions
+        for permission in permission_data.permissions:
+            if permission not in valid_permissions[permission_data.resource_type]:
+                valid_perms = ", ".join(valid_permissions[permission_data.resource_type])
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Invalid permission '{permission}' for {permission_data.resource_type} resource. Must be one of: {valid_perms}"
+                )
+        
+        # Prevent modification of admin role permissions
+        if permission_data.role == "admin":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot modify admin role permissions. Admin role has all permissions by default."
+            )
+        
+        # Remove each permission
+        removed_permissions = []
+        failed_permissions = []
+        
+        for permission in permission_data.permissions:
+            # Check if permission exists
+            if await RolePermissionRepository.has_permission(
+                permission_data.role, 
+                permission, 
+                permission_data.resource_type
+            ):
+                # Remove the permission
+                success = await RolePermissionRepository.remove_permission(
+                    permission_data.role,
+                    permission,
+                    permission_data.resource_type
+                )
+                
+                if success:
+                    removed_permissions.append(permission)
+                else:
+                    failed_permissions.append(permission)
+            else:
+                failed_permissions.append(permission)
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Removed {len(removed_permissions)} permissions from role {permission_data.role}",
+            "role": permission_data.role,
+            "resource_type": permission_data.resource_type,
+            "removed_permissions": removed_permissions,
+            "failed_permissions": failed_permissions,
+            "total_requested": len(permission_data.permissions),
+            "total_removed": len(removed_permissions),
+            "total_failed": len(failed_permissions)
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing multiple permissions: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    """
+    Remove a permission from a role (admin only).
+    This allows admins to restrict what each role can do.
+    
+    Note: Admin role permissions cannot be modified as they have all permissions by default.
+    """
+    try:
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to manage role permissions."
+            )
+        
+        from app.db.repositories import RolePermissionRepository
+        
+        # Validate role
+        if permission_data.role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        # Validate permission based on resource type
+        valid_permissions = {
+            "workflow": ["read", "write", "delete", "execute", "create"],
+            "group": ["read", "write", "delete"],
+            "config": ["read", "write", "delete"]
+        }
+        
+        if permission_data.resource_type not in valid_permissions:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, group, or config")
+        
+        if permission_data.permission not in valid_permissions[permission_data.resource_type]:
+            valid_perms = ", ".join(valid_permissions[permission_data.resource_type])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid permission for {permission_data.resource_type} resource. Must be one of: {valid_perms}"
+            )
         
         # Prevent modification of admin role permissions
         if permission_data.role == "admin":
@@ -1410,8 +1395,8 @@ async def reset_role_permissions_route(
     Note: Admin role cannot be reset as it has all permissions by default.
     """
     try:
-        # Additional security: Verify user role from auth token
-        user_role = await get_user_role_from_token(current_user)
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
         if user_role != "admin":
             raise HTTPException(
                 status_code=403,
@@ -1490,16 +1475,21 @@ async def reset_all_role_permissions_route(
     - Manager role: Read/write/execute on workflows, read/write on groups
     - Viewer role: Read permissions on workflows and groups
     """
+    print("Entered function !!!!")
     try:
-        # Additional security: Verify user role from auth token
-        user_role = await get_user_role_from_token(current_user)
+        # Use role from JWT claims (as designed by the auth system)
+        user_role = current_user.get("role", "viewer")
         
+        # Normalize the role value (handle case sensitivity and whitespace)
+        if user_role:
+            user_role = str(user_role).strip().lower()
+        else:
+            user_role = "viewer"
         if user_role != "admin":
             raise HTTPException(
                 status_code=403,
                 detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to reset all permissions."
             )
-        
         from app.db.database import db_service
         
         # Reset all role permissions to defaults
