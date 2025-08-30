@@ -6,7 +6,7 @@ from app.services.workflow_service import (
     get_next_available_order, reorder_steps_sequentially, generate_step_id
 )
 from app.db.repositories import WorkflowRepository
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, verify_workflow_read_permission
 from app.db.models import WorkflowCreateRequest, WorkflowUpdate, WorkflowStep
 from typing import List, Dict, Any
 import logging
@@ -97,22 +97,32 @@ async def create_workflow_route(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/list", tags=["Workflow"])
-async def list_workflows(current_user: dict = Depends(get_current_user)):
+async def list_workflows(current_user: dict = Depends(verify_workflow_read_permission)):
     """
     Get all workflows for the authenticated user with detailed permission information.
     Returns workflows owned by the user and workflows shared with teams the user is a member of,
     including access levels and group information.
     """
     
-    print(current_user)
     try:
+        # User permissions already verified by verify_workflow_read_permission dependency
+        # current_user now contains JWT role and permissions data
+        user_role = current_user.get("role", "viewer")
+        workflow_permissions = current_user.get("permissions", {}).get("workflow", [])
+        
+        logger.info(f"User {current_user['id']} with role '{user_role}' and workflow permissions {workflow_permissions} listing workflows")
+        
+        # Check if user has read permission on workflow resource
+        if "read" not in workflow_permissions:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User needs 'read' permission on 'workflow' resource to list workflows."
+            )
+        
         from app.db.repositories import WorkflowRepository, WorkflowShareRepository, UserGroupRepository
         
         # Get user's own workflows
         own_workflows = await get_user_workflows(current_user["id"])
-        
-        # Get user's role and permissions from JWT
-        user_role = current_user.get("role", "viewer")
         
         # Get workflows from teams the user is a member of
         team_workflows = await WorkflowRepository.get_all_by_user_groups(current_user["id"])
@@ -264,13 +274,27 @@ async def list_workflows(current_user: dict = Depends(get_current_user)):
 @router.get("/{workflow_id}", tags=["Workflow"])
 async def get_workflow_route(
     workflow_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(verify_workflow_read_permission)
 ):
     """
     Get a specific workflow by ID.
     Returns workflows owned by the authenticated user or workflows shared with teams the user is a member of.
     """
     try:
+        # User permissions already verified by verify_workflow_read_permission dependency
+        # current_user now contains JWT role and permissions data
+        user_role = current_user.get("role", "viewer")
+        workflow_permissions = current_user.get("permissions", {}).get("workflow", [])
+        
+        logger.info(f"User {current_user['id']} with role '{user_role}' and workflow permissions {workflow_permissions} accessing workflow {workflow_id}")
+        
+        # Check if user has read permission on workflow resource
+        if "read" not in workflow_permissions:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User needs 'read' permission on 'workflow' resource to access workflows."
+            )
+        
         # First try to get workflow as owner
         workflow = await get_workflow_by_id(workflow_id, current_user["id"])
         
@@ -514,11 +538,11 @@ async def delete_step_route(
     The step directory will also be deleted.
     """
     try:
-        # Check user permission to modify workflow steps using JWT permissions
-        if not _check_user_permission(current_user, "write"):
+        # Check user permission to delete workflow steps using JWT permissions
+        if not _check_user_permission(current_user, "delete"):
             raise HTTPException(
                 status_code=403, 
-                detail="Insufficient permissions. User needs 'write' permission on 'workflow' resource to modify workflow steps."
+                detail="Insufficient permissions. User needs 'delete' permission on 'workflow' resource to delete workflow steps."
             )
         
         # Get the current workflow
@@ -1172,10 +1196,10 @@ async def share_workflow_with_group(
     """
     try:
         # Check user permission to share workflows using JWT permissions
-        if not _check_user_permission(current_user, "assign"):
+        if not _check_user_permission(current_user, "write"):
             raise HTTPException(
                 status_code=403, 
-                detail="Insufficient permissions. User needs 'assign' permission on 'workflow' resource to share workflows."
+                detail="Insufficient permissions. User needs 'write' permission on 'workflow' resource to share workflows."
             )
         
         # Ensure workflow exists and belongs to current user
@@ -1209,10 +1233,10 @@ async def unshare_workflow_with_group(
     """
     try:
         # Check user permission to manage workflow sharing using JWT permissions
-        if not _check_user_permission(current_user, "assign"):
+        if not _check_user_permission(current_user, "write"):
             raise HTTPException(
                 status_code=403, 
-                detail="Insufficient permissions. User needs 'assign' permission on 'workflow' resource to manage workflow sharing."
+                detail="Insufficient permissions. User needs 'write' permission on 'workflow' resource to manage workflow sharing."
             )
         
         # Ensure workflow exists and belongs to current user
@@ -1237,7 +1261,7 @@ async def unshare_workflow_with_group(
 @router.get("/{workflow_id}/permissions", tags=["Workflow"])
 async def get_workflow_permissions(
     workflow_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(verify_workflow_read_permission)
 ):
     """
     Get workflow permissions and group assignments.
@@ -1246,11 +1270,18 @@ async def get_workflow_permissions(
     try:
         from app.db.repositories import WorkflowRepository, WorkflowShareRepository, UserGroupRepository
         
-        # Check user permission to view workflow permissions using JWT permissions
-        if not _check_user_permission(current_user, "read"):
+        # User permissions already verified by verify_workflow_read_permission dependency
+        # current_user now contains JWT role and permissions data
+        user_role = current_user.get("role", "viewer")
+        workflow_permissions = current_user.get("permissions", {}).get("workflow", [])
+        
+        logger.info(f"User {current_user['id']} with role '{user_role}' and workflow permissions {workflow_permissions} viewing permissions for workflow {workflow_id}")
+        
+        # Check if user has read permission on workflow resource
+        if "read" not in workflow_permissions:
             raise HTTPException(
-                status_code=403, 
-                detail="Insufficient permissions. User needs 'read' permission on 'workflow' resource to view workflow permissions."
+                status_code=403,
+                detail=f"Insufficient permissions. User needs 'read' permission on 'workflow' resource to view workflow permissions."
             )
         
         # First, check if user owns the workflow
@@ -1338,7 +1369,7 @@ async def debug_user_role(current_user: dict = Depends(get_current_user)):
             "write": _check_user_permission(current_user, "write"),
             "delete": _check_user_permission(current_user, "delete"),
             "execute": _check_user_permission(current_user, "execute"),
-            "assign": _check_user_permission(current_user, "assign")
+            "create": _check_user_permission(current_user, "create")
         }
         
         return JSONResponse({
@@ -1409,7 +1440,7 @@ def _check_user_permission(current_user: dict, required_permission: str) -> bool
     
     Args:
         current_user: Current user object with permissions from JWT
-        required_permission: Required permission (create, read, write, delete, execute, assign)
+        required_permission: Required permission (create, read, write, delete, execute)
     
     Returns:
         True if user has permission, False otherwise

@@ -167,9 +167,19 @@ class AuthService:
             logger.warning(f"Refresh token attempt for inactive user {user_id}")
             return None
         
-        # Create new access token (short-lived)
+        # IMPORTANT: Preserve all claims from the refresh token
+        # The refresh token contains the same claims as the original access token
+        # including role, permissions, and is_admin status
+        jwt_data = {
+            "sub": str(user_id),
+            "role": payload.get("role", "viewer"),
+            "permissions": payload.get("permissions", {}),
+            "is_admin": payload.get("is_admin", False)
+        }
+        
+        # Create new access token (short-lived) with preserved claims
         new_access_token = await self.create_access_token(
-            data={"sub": str(user_id)},
+            data=jwt_data,
             expires_delta=timedelta(minutes=self.access_token_expire_minutes)
         )
         
@@ -740,25 +750,29 @@ class AuthService:
             logger.warning(f"No permissions found in database for role '{user_role}', using default permissions")
             if user_role == "admin":
                 grouped_permissions = {
-                    "workflow": ["read", "write", "execute", "delete", "create", "assign"],
-                    "group": ["read", "write", "execute", "delete"]
+                    "workflow": ["read", "write", "execute", "delete", "create"],
+                    "group": ["read", "write", "delete"],
+                    "config": ["read", "write", "delete"]
                 }
             elif user_role == "manager":
                 grouped_permissions = {
                     "workflow": ["read", "write", "execute", "create"],
-                    "group": ["read", "write"]
+                    "group": ["read", "write"],
+                    "config": ["read"]
                 }
             elif user_role == "viewer":
                 grouped_permissions = {
                     "workflow": ["read", "execute"],
-                    "group": ["read"]
+                    "group": ["read"],
+                    "config": ["read"]
                 }
             else:
                 # Unknown role, default to viewer
                 user_role = "viewer"
                 grouped_permissions = {
                     "workflow": ["read", "execute"],
-                    "group": ["read"]
+                    "group": ["read"],
+                    "config": ["read"]
                 }
         
         jwt_data = {

@@ -601,10 +601,13 @@ class DatabaseService:
                 ("admin", "write", "workflow"),
                 ("admin", "delete", "workflow"),
                 ("admin", "execute", "workflow"),
+                ("admin", "create", "workflow"),
                 ("admin", "read", "group"),
                 ("admin", "write", "group"),
                 ("admin", "delete", "group"),
-                ("admin", "execute", "group"),
+                ("admin", "read", "config"),
+                ("admin", "write", "config"),
+                ("admin", "delete", "config"),
             ]
             
             # Default permissions for Manager role
@@ -612,14 +615,18 @@ class DatabaseService:
                 ("manager", "read", "workflow"),
                 ("manager", "write", "workflow"),
                 ("manager", "execute", "workflow"),
+                ("manager", "create", "workflow"),
                 ("manager", "read", "group"),
                 ("manager", "write", "group"),
+                ("manager", "read", "config"),
             ]
             
             # Default permissions for Viewer role
             viewer_permissions = [
                 ("viewer", "read", "workflow"),
+                ("viewer", "execute", "workflow"),
                 ("viewer", "read", "group"),
+                ("viewer", "read", "config"),
             ]
             
             # Insert all permissions
@@ -652,7 +659,7 @@ class DatabaseService:
             """)
             
             admin_permission_count = result.rows[0][0]
-            expected_admin_permissions = 8  # 4 permissions × 2 resource types
+            expected_admin_permissions = 11  # 5 workflow + 3 group + 3 config permissions
             
             if admin_permission_count < expected_admin_permissions:
                 logger.warning(f"Admin role has {admin_permission_count} permissions, expected {expected_admin_permissions}")

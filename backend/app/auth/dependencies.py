@@ -46,7 +46,6 @@ async def get_current_admin_user(current_user: dict = Depends(get_current_user))
     try:
         # Check if user has admin role using the role field that's now included in user data
         user_role = current_user.get("role", "viewer")
-        
         if user_role != "admin":
             raise HTTPException(
                 status_code=403, 
@@ -280,6 +279,146 @@ async def verify_workflow_execute_permission(current_user: dict = Depends(get_cu
             raise HTTPException(
                 status_code=403,
                 detail=f"Workflow execution permission verification failed. Defaulting to viewer role with limited permissions."
+            )
+
+async def verify_workflow_read_permission(current_user: dict = Depends(get_current_user)) -> dict:
+    """Verify read permission for workflow access."""
+    try:
+        # Use permissions from JWT claims (already verified and fresh)
+        user_role = current_user.get("role", "viewer")
+        grouped_permissions = current_user.get("permissions", {})
+        
+        # Check if user has read permission on 'workflow' resource
+        workflow_permissions = grouped_permissions.get("workflow", [])
+        if "read" not in workflow_permissions:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions for workflow access. User has role '{user_role}' with workflow permissions {workflow_permissions}, but 'read' permission on 'workflow' resource is required."
+            )
+        
+        return current_user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Emergency fallback - only use is_admin for permanent admins
+        if current_user.get("is_admin", False):
+            # Permanent admin has all permissions
+            current_user["role"] = "admin"
+            current_user["permissions"] = ["read", "write", "execute", "delete"]
+            return current_user
+        else:
+            # Default to viewer permissions
+            current_user["role"] = "viewer"
+            current_user["permissions"] = ["read", "execute"]
+            raise HTTPException(
+                status_code=403,
+                detail=f"Workflow read permission verification failed. Defaulting to viewer role with limited permissions."
+            )
+
+async def verify_config_read_permission(current_user: dict = Depends(get_current_user)) -> dict:
+    """Verify read permission for config access."""
+    try:
+        # Use permissions from JWT claims (already verified and fresh)
+        user_role = current_user.get("role", "viewer")
+        grouped_permissions = current_user.get("permissions", {})
+        
+        # Check if user has read permission on 'config' resource
+        config_permissions = grouped_permissions.get("config", [])
+        if "read" not in config_permissions:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions for config access. User has role '{user_role}' with config permissions {config_permissions}, but 'read' permission on 'config' resource is required."
+            )
+        
+        return current_user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Emergency fallback - only use is_admin for permanent admins
+        if current_user.get("is_admin", False):
+            # Permanent admin has all permissions
+            current_user["role"] = "admin"
+            current_user["permissions"] = ["read", "write", "delete"]
+            return current_user
+        else:
+            # Default to viewer permissions
+            current_user["role"] = "viewer"
+            current_user["permissions"] = ["read"]
+            raise HTTPException(
+                status_code=403,
+                detail=f"Config read permission verification failed. Defaulting to viewer role with limited permissions."
+            )
+
+async def verify_config_write_permission(current_user: dict = Depends(get_current_user)) -> dict:
+    """Verify write permission for config management."""
+    try:
+        # Use permissions from JWT claims (already verified and fresh)
+        user_role = current_user.get("role", "viewer")
+        grouped_permissions = current_user.get("permissions", {})
+        
+        # Check if user has write permission on 'config' resource
+        config_permissions = grouped_permissions.get("config", [])
+        if "write" not in config_permissions:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions for config management. User has role '{user_role}' with config permissions {config_permissions}, but 'write' permission on 'config' resource is required."
+            )
+        
+        return current_user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Emergency fallback - only use is_admin for permanent admins
+        if current_user.get("is_admin", False):
+            # Permanent admin has all permissions
+            current_user["role"] = "admin"
+            current_user["permissions"] = ["read", "write", "delete"]
+            return current_user
+        else:
+            # Default to viewer permissions
+            current_user["role"] = "viewer"
+            current_user["permissions"] = ["read"]
+            raise HTTPException(
+                status_code=403,
+                detail=f"Config write permission verification failed. Defaulting to viewer role with limited permissions."
+            )
+
+async def verify_config_delete_permission(current_user: dict = Depends(get_current_user)) -> dict:
+    """Verify delete permission for config management."""
+    try:
+        # Use permissions from JWT claims (already verified and fresh)
+        user_role = current_user.get("role", "viewer")
+        grouped_permissions = current_user.get("permissions", {})
+        
+        # Check if user has delete permission on 'config' resource
+        config_permissions = grouped_permissions.get("config", [])
+        if "delete" not in config_permissions:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions for config management. User has role '{user_role}' with config permissions {config_permissions}, but 'delete' permission on 'config' resource is required."
+            )
+        
+        return current_user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Emergency fallback - only use is_admin for permanent admins
+        if current_user.get("is_admin", False):
+            # Permanent admin has all permissions
+            current_user["role"] = "admin"
+            current_user["permissions"] = ["read", "write", "delete"]
+            return current_user
+        else:
+            # Default to viewer permissions
+            current_user["role"] = "viewer"
+            current_user["permissions"] = ["read"]
+            raise HTTPException(
+                status_code=403,
+                detail=f"Config delete permission verification failed. Defaulting to viewer role with limited permissions."
             )
 
 async def get_user_info_from_token(current_user: dict = Depends(get_current_user)) -> dict:

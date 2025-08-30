@@ -75,6 +75,11 @@ class RolePermissionRemove(BaseModel):
     permission: str  # read, write, delete, execute
     resource_type: str  # workflow, user, group, system, etc.
 
+class RolePermissionRemoveMultiple(BaseModel):
+    role: str  # admin, manager, viewer
+    permissions: List[str]  # list of permissions to remove: ["read", "write", "delete"]
+    resource_type: str  # workflow, user, group, system, etc.
+
 class RolePermissionResponse(BaseModel):
     role: str
     permission: str
@@ -1033,8 +1038,8 @@ async def add_role_permission_route(
     Note: Admin role permissions cannot be modified as they have all permissions by default.
     """
     try:
-        # Additional security: Verify user role from auth token
-        user_role = await get_user_role_from_token(current_user)
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
         if user_role != "admin":
             raise HTTPException(
                 status_code=403,
@@ -1047,13 +1052,22 @@ async def add_role_permission_route(
         if permission_data.role not in ["admin", "manager", "viewer"]:
             raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
         
-        # Validate permission
-        if permission_data.permission not in ["read", "write", "delete", "execute"]:
-            raise HTTPException(status_code=400, detail="Invalid permission. Must be read, write, delete, or execute")
+        # Validate permission based on resource type
+        valid_permissions = {
+            "workflow": ["read", "write", "delete", "execute", "create"],
+            "group": ["read", "write", "delete"],
+            "config": ["read", "write", "delete"]
+        }
         
-        # Validate resource type
-        if permission_data.resource_type not in ["workflow", "group"]:
-            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow or group")
+        if permission_data.resource_type not in valid_permissions:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, group, or config")
+        
+        if permission_data.permission not in valid_permissions[permission_data.resource_type]:
+            valid_perms = ", ".join(valid_permissions[permission_data.resource_type])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid permission for {permission_data.resource_type} resource. Must be one of: {valid_perms}"
+            )
         
         # Prevent modification of admin role permissions
         if permission_data.role == "admin":
@@ -1111,8 +1125,8 @@ async def remove_role_permission_route(
     Note: Admin role permissions cannot be modified as they have all permissions by default.
     """
     try:
-        # Additional security: Verify user role from auth token
-        user_role = await get_user_role_from_token(current_user)
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
         if user_role != "admin":
             raise HTTPException(
                 status_code=403,
@@ -1125,13 +1139,205 @@ async def remove_role_permission_route(
         if permission_data.role not in ["admin", "manager", "viewer"]:
             raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
         
-        # Validate permission
-        if permission_data.permission not in ["read", "write", "delete", "execute"]:
-            raise HTTPException(status_code=400, detail="Invalid permission. Must be read, write, delete, or execute")
+        # Validate permission based on resource type
+        valid_permissions = {
+            "workflow": ["read", "write", "delete", "execute", "create"],
+            "group": ["read", "write", "delete"],
+            "config": ["read", "write", "delete"]
+        }
         
-        # Validate resource type
-        if permission_data.resource_type not in ["workflow", "group"]:
-            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow or group")
+        if permission_data.resource_type not in valid_permissions:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, group, or config")
+        
+        if permission_data.permission not in valid_permissions[permission_data.resource_type]:
+            valid_perms = ", ".join(valid_permissions[permission_data.resource_type])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid permission for {permission_data.resource_type} resource. Must be one of: {valid_perms}"
+            )
+        
+        # Prevent modification of admin role permissions
+        if permission_data.role == "admin":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot modify admin role permissions. Admin role has all permissions by default."
+            )
+        
+        # Check if permission exists
+        if not await RolePermissionRepository.has_permission(
+            permission_data.role, 
+            permission_data.permission, 
+            permission_data.resource_type
+        ):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Permission {permission_data.permission} does not exist for role {permission_data.role} on resource {permission_data.resource_type}"
+            )
+        
+        # Remove the permission
+        success = await RolePermissionRepository.remove_permission(
+            permission_data.role,
+            permission_data.permission,
+            permission_data.resource_type
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to remove permission")
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Permission {permission_data.permission} removed from role {permission_data.role} for resource {permission_data.resource_type}",
+            "removed_permission": {
+                "role": permission_data.role,
+                "permission": permission_data.permission,
+                "resource_type": permission_data.resource_type
+            }
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing permission: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.delete("/role-permissions/multiple", tags=["Admin Role Permissions"])
+async def remove_multiple_role_permissions_route(
+    permission_data: RolePermissionRemoveMultiple,
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Remove multiple permissions from a role (admin only).
+    This allows admins to remove multiple permissions at once.
+    
+    Example request body:
+    {
+        "role": "manager",
+        "permissions": ["read", "write", "delete"],
+        "resource_type": "config"
+    }
+    
+    Note: Admin role permissions cannot be modified as they have all permissions by default.
+    """
+    try:
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to manage role permissions."
+            )
+        
+        from app.db.repositories import RolePermissionRepository
+        
+        # Validate role
+        if permission_data.role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        # Validate permission based on resource type
+        valid_permissions = {
+            "workflow": ["read", "write", "delete", "execute", "create"],
+            "group": ["read", "write", "delete"],
+            "config": ["read", "write", "delete"]
+        }
+        
+        if permission_data.resource_type not in valid_permissions:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, group, or config")
+        
+        # Validate all permissions
+        for permission in permission_data.permissions:
+            if permission not in valid_permissions[permission_data.resource_type]:
+                valid_perms = ", ".join(valid_permissions[permission_data.resource_type])
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Invalid permission '{permission}' for {permission_data.resource_type} resource. Must be one of: {valid_perms}"
+                )
+        
+        # Prevent modification of admin role permissions
+        if permission_data.role == "admin":
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot modify admin role permissions. Admin role has all permissions by default."
+            )
+        
+        # Remove each permission
+        removed_permissions = []
+        failed_permissions = []
+        
+        for permission in permission_data.permissions:
+            # Check if permission exists
+            if await RolePermissionRepository.has_permission(
+                permission_data.role, 
+                permission, 
+                permission_data.resource_type
+            ):
+                # Remove the permission
+                success = await RolePermissionRepository.remove_permission(
+                    permission_data.role,
+                    permission,
+                    permission_data.resource_type
+                )
+                
+                if success:
+                    removed_permissions.append(permission)
+                else:
+                    failed_permissions.append(permission)
+            else:
+                failed_permissions.append(permission)
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Removed {len(removed_permissions)} permissions from role {permission_data.role}",
+            "role": permission_data.role,
+            "resource_type": permission_data.resource_type,
+            "removed_permissions": removed_permissions,
+            "failed_permissions": failed_permissions,
+            "total_requested": len(permission_data.permissions),
+            "total_removed": len(removed_permissions),
+            "total_failed": len(failed_permissions)
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing multiple permissions: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    """
+    Remove a permission from a role (admin only).
+    This allows admins to restrict what each role can do.
+    
+    Note: Admin role permissions cannot be modified as they have all permissions by default.
+    """
+    try:
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
+        if user_role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to manage role permissions."
+            )
+        
+        from app.db.repositories import RolePermissionRepository
+        
+        # Validate role
+        if permission_data.role not in ["admin", "manager", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, or viewer")
+        
+        # Validate permission based on resource type
+        valid_permissions = {
+            "workflow": ["read", "write", "delete", "execute", "create"],
+            "group": ["read", "write", "delete"],
+            "config": ["read", "write", "delete"]
+        }
+        
+        if permission_data.resource_type not in valid_permissions:
+            raise HTTPException(status_code=400, detail="Invalid resource type. Must be workflow, group, or config")
+        
+        if permission_data.permission not in valid_permissions[permission_data.resource_type]:
+            valid_perms = ", ".join(valid_permissions[permission_data.resource_type])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid permission for {permission_data.resource_type} resource. Must be one of: {valid_perms}"
+            )
         
         # Prevent modification of admin role permissions
         if permission_data.role == "admin":
@@ -1189,8 +1395,8 @@ async def reset_role_permissions_route(
     Note: Admin role cannot be reset as it has all permissions by default.
     """
     try:
-        # Additional security: Verify user role from auth token
-        user_role = await get_user_role_from_token(current_user)
+        # Verify user role from JWT claims
+        user_role = current_user.get("role")
         if user_role != "admin":
             raise HTTPException(
                 status_code=403,
@@ -1269,16 +1475,21 @@ async def reset_all_role_permissions_route(
     - Manager role: Read/write/execute on workflows, read/write on groups
     - Viewer role: Read permissions on workflows and groups
     """
+    print("Entered function !!!!")
     try:
-        # Additional security: Verify user role from auth token
-        user_role = await get_user_role_from_token(current_user)
+        # Use role from JWT claims (as designed by the auth system)
+        user_role = current_user.get("role", "viewer")
         
+        # Normalize the role value (handle case sensitivity and whitespace)
+        if user_role:
+            user_role = str(user_role).strip().lower()
+        else:
+            user_role = "viewer"
         if user_role != "admin":
             raise HTTPException(
                 status_code=403,
                 detail=f"Insufficient permissions. User has role '{user_role}', but admin role is required to reset all permissions."
             )
-        
         from app.db.database import db_service
         
         # Reset all role permissions to defaults
