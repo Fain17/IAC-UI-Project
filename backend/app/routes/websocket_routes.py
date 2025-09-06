@@ -31,6 +31,7 @@ def verify_websocket_token(token: str) -> dict:
 async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     """WebSocket endpoint for token monitoring."""
     connection_closed = False
+    connection_id = None
     
     try:
         await websocket.accept()
@@ -43,6 +44,10 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
         # Connect to WebSocket manager
         await websocket_manager.connect(websocket, token)
         logger.info("Connected to WebSocket manager")
+        
+        # Get the connection ID from the manager (we'll need to modify the manager to return it)
+        # For now, we'll use a different approach - store connection info in the websocket object
+        websocket.connection_info = {"token": token, "user_id": token_info['user_id']}
         
         # Keep connection alive and monitor for disconnection
         try:
@@ -73,7 +78,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
         finally:
             # Only disconnect if not already closed
             if not connection_closed:
-                await websocket_manager.disconnect()
+                # Find and disconnect this specific connection
+                await websocket_manager.disconnect_by_websocket(websocket)
             
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
@@ -87,5 +93,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
 async def get_websocket_status():
     """Get WebSocket connection status."""
     return {
-        "connected": websocket_manager.is_connected()
+        "connected": websocket_manager.is_connected(),
+        "connection_stats": websocket_manager.get_connection_stats(),
+        "total_connections": websocket_manager.get_connection_count()
     } 

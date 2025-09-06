@@ -281,15 +281,50 @@ async def verify_workflow_execute_permission(current_user: dict = Depends(get_cu
                 detail=f"Workflow execution permission verification failed. Defaulting to viewer role with limited permissions."
             )
 
-async def verify_workflow_read_permission(current_user: dict = Depends(get_current_user)) -> dict:
-    """Verify read permission for workflow access."""
+async def verify_workflow_write_permission(current_user: dict = Depends(get_current_user)) -> dict:
+    """Verify write permission for workflow modification."""
     try:
         # Use permissions from JWT claims (already verified and fresh)
         user_role = current_user.get("role", "viewer")
         grouped_permissions = current_user.get("permissions", {})
         
-        # Check if user has read permission on 'workflow' resource
+        # Check if user has write permission on 'workflow' resource
         workflow_permissions = grouped_permissions.get("workflow", [])
+        if "write" not in workflow_permissions:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions for workflow modification. User has role '{user_role}' with workflow permissions {workflow_permissions}, but 'write' permission on 'workflow' resource is required."
+            )
+        
+        return current_user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Emergency fallback - only use is_admin for permanent admins
+        if current_user.get("is_admin", False):
+            # Permanent admin has all permissions
+            current_user["role"] = "admin"
+            current_user["permissions"] = ["read", "write", "execute", "delete"]
+            return current_user
+        else:
+            # Default to viewer permissions
+            current_user["role"] = "viewer"
+            current_user["permissions"] = ["read", "execute"]
+            raise HTTPException(
+                status_code=403,
+                detail=f"Workflow write permission verification failed. Defaulting to viewer role with limited permissions."
+            )
+
+async def verify_workflow_read_permission(current_user: dict = Depends(get_current_user)) -> dict:
+    """Verify read permission for workflow access."""
+    try:
+        # Use permissions from JWT claims (already verified and fresh)
+        user_role = current_user.get("role", "viewer")
+        user_permissions = current_user.get("permissions", {})
+        
+        # Check if user has read permission on 'workflow' resource
+        workflow_permissions = user_permissions.get("workflow", [])
         if "read" not in workflow_permissions:
             raise HTTPException(
                 status_code=403,

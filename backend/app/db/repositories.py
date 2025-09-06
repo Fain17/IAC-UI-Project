@@ -107,108 +107,6 @@ class ConfigMappingRepository:
             logger.error(f"Error deleting mapping: {e}")
             return False
 
-class DockerImageMappingRepository:
-    """Repository for Docker image mappings for script types."""
-
-    @staticmethod
-    async def upsert(types: List[str], image: str) -> Optional[int]:
-        """Create or update a mapping for a set of script types. Returns mapping id on success."""
-        if not db_service.client:
-            return None
-        try:
-            normalized = sorted(set([t.strip().lower() for t in types if t]))
-            types_json = json.dumps(normalized, separators=(",", ":"))
-
-            # Check if mapping with exact same types exists
-            existing = await db_service.client.execute(
-                "SELECT id FROM docker_image_mappings WHERE types = ?",
-                [types_json]
-            )
-            if existing.rows:
-                mapping_id = existing.rows[0][0]
-                await db_service.client.execute(
-                    "UPDATE docker_image_mappings SET image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    [image, mapping_id]
-                )
-                return int(mapping_id)
-
-            # Insert new mapping
-            result = await db_service.client.execute(
-                "INSERT INTO docker_image_mappings (types, image) VALUES (?, ?)",
-                [types_json, image]
-            )
-            # libsql returns last_insert_rowid as rows? Fallback to reselect
-            row = await db_service.client.execute(
-                "SELECT id FROM docker_image_mappings WHERE types = ? AND image = ? ORDER BY id DESC LIMIT 1",
-                [types_json, image]
-            )
-            return int(row.rows[0][0]) if row.rows else None
-        except Exception as e:
-            logger.error(f"Error upserting docker image mapping: {e}")
-            return None
-
-    @staticmethod
-    async def list_all() -> List[Dict]:
-        if not db_service.client:
-            return []
-        try:
-            result = await db_service.client.execute(
-                "SELECT id, types, image, created_at, updated_at FROM docker_image_mappings ORDER BY id DESC"
-            )
-            mappings: List[Dict] = []
-            for row in result.rows:
-                try:
-                    types = json.loads(row[1])
-                except Exception:
-                    types = []
-                mappings.append({
-                    "id": int(row[0]),
-                    "types": types,
-                    "image": str(row[2]),
-                    "created_at": row[3],
-                    "updated_at": row[4]
-                })
-            return mappings
-        except Exception as e:
-            logger.error(f"Error listing docker image mappings: {e}")
-            return []
-
-    @staticmethod
-    async def get_image_for_type(script_type: str) -> Optional[str]:
-        """Return the most recent image that includes the given script type in its types list."""
-        if not db_service.client:
-            return None
-        try:
-            result = await db_service.client.execute(
-                "SELECT types, image FROM docker_image_mappings ORDER BY updated_at DESC, id DESC"
-            )
-            st = (script_type or "").strip().lower()
-            for row in result.rows:
-                try:
-                    types = json.loads(row[0])
-                except Exception:
-                    types = []
-                if st in types:
-                    return str(row[1])
-            return None
-        except Exception as e:
-            logger.error(f"Error resolving docker image for type {script_type}: {e}")
-            return None
-
-    @staticmethod
-    async def delete(mapping_id: int) -> bool:
-        if not db_service.client:
-            return False
-        try:
-            result = await db_service.client.execute(
-                "DELETE FROM docker_image_mappings WHERE id = ?",
-                [mapping_id]
-            )
-            return result.rows_affected > 0
-        except Exception as e:
-            logger.error(f"Error deleting docker image mapping: {e}")
-            return False
-
 class UserRepository:
     """Repository for user operations."""
     
@@ -1307,7 +1205,70 @@ class UserSessionRepository:
             return bool(result.rows)
         except Exception as e:
             logger.error(f"Error checking user session: {e}")
-            return False 
+            return False
+
+    @staticmethod
+    async def get_all_for_user(user_id: str) -> List[Dict]:
+        """Get all active sessions for a user."""
+        if not db_service.client:
+            return []
+        try:
+            result = await db_service.client.execute(
+                "SELECT id, session_token, expires_at, created_at FROM user_sessions WHERE user_id = ?",
+                [user_id]
+            )
+            return [
+                {
+                    "id": row[0],
+                    "session_token": row[1],
+                    "expires_at": row[2],
+                    "created_at": row[3]
+                }
+                for row in result.rows
+            ]
+        except Exception as e:
+            logger.error(f"Error getting sessions for user {user_id}: {e}")
+            return []
+
+    @staticmethod
+    async def delete_all_for_user(user_id: str) -> bool:
+        """Delete all sessions for a user."""
+        if not db_service.client:
+            return False
+        try:
+            result = await db_service.client.execute(
+                "DELETE FROM user_sessions WHERE user_id = ?",
+                [user_id]
+            )
+            deleted_count = result.rows_affected
+            logger.info(f"Deleted {deleted_count} sessions for user {user_id}")
+            return deleted_count > 0
+        except Exception as e:
+            logger.error(f"Error deleting sessions for user {user_id}: {e}")
+            return False
+
+    @staticmethod
+    async def get_all_active_sessions() -> List[Dict]:
+        """Get all active sessions."""
+        if not db_service.client:
+            return []
+        try:
+            current_time = datetime.now(timezone.utc).isoformat()
+            result = await db_service.client.execute(
+                "SELECT user_id, session_token, expires_at FROM user_sessions WHERE expires_at > ?",
+                [current_time]
+            )
+            return [
+                {
+                    "user_id": row[0],
+                    "session_token": row[1],
+                    "expires_at": row[2]
+                }
+                for row in result.rows
+            ]
+        except Exception as e:
+            logger.error(f"Error getting all active sessions: {e}")
+            return [] 
 
 class RefreshTokenRepository:
     """Repository for refresh token operations."""
@@ -2194,6 +2155,28 @@ class DockerMappingRepository:
         except Exception as e:
             logger.error(f"Error deleting docker mapping: {e}")
             return False
+
+    @staticmethod
+    async def get_image_for_type(script_type: str) -> Optional[str]:
+        """Get the most recent active Docker image for a script type."""
+        if not db_service.client:
+            return None
+        try:
+            result = await db_service.client.execute("""
+                SELECT docker_image, docker_tag FROM docker_mappings 
+                WHERE script_type = ? AND is_active = 1 
+                ORDER BY updated_at DESC, created_at DESC 
+                LIMIT 1
+            """, [script_type])
+            
+            if result.rows:
+                docker_image = result.rows[0][0]
+                docker_tag = result.rows[0][1]
+                return f"{docker_image}:{docker_tag}"
+            return None
+        except Exception as e:
+            logger.error(f"Error getting Docker image for type {script_type}: {e}")
+            return None
 
 
 class ResourceMappingRepository:
