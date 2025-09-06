@@ -173,17 +173,6 @@ class DatabaseService:
             # Check if users and groups tables need migration
             await self._migrate_users_and_groups_tables()
             
-            # Create docker image mappings table
-            await self.client.execute("""
-                CREATE TABLE IF NOT EXISTS docker_image_mappings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    types TEXT NOT NULL, -- JSON array of script types (e.g., ["python"], ["python","nodejs"]) 
-                    image TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
             # Create workflow shares table
             await self.client.execute("""
                 CREATE TABLE IF NOT EXISTS workflow_shares (

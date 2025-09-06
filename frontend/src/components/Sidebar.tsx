@@ -40,7 +40,7 @@ const Sidebar: React.FC = () => {
         <div className="settings-submenu">
           <div className="submenu-header">Configurations</div>
           <div className="submenu-subheader">Mapping</div>
-          <Link to="/configurations/docker" className={`submenu-item ${location.pathname.startsWith('/configurations/docker') ? 'active' : ''}`}>🐳 Docker Execution Mapping</Link>
+          <Link to="/docker-mappings" className={`submenu-item ${location.pathname.startsWith('/docker-mappings') ? 'active' : ''}`}>🐳 Docker Mappings</Link>
           <Link to="/configurations/custom" className={`submenu-item ${location.pathname.startsWith('/configurations/custom') ? 'active' : ''}`}>🧩 Custom Mapping</Link>
           <div className="submenu-subheader">Vault</div>
           <Link to="/configurations/vault" className={`submenu-item ${location.pathname.startsWith('/configurations/vault') ? 'active' : ''}`}>🔐 Vault Config</Link>

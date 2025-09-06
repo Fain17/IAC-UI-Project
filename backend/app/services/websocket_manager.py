@@ -8,61 +8,170 @@ logger = logging.getLogger(__name__)
 
 class WebSocketManager:
     def __init__(self):
-        self.websocket: WebSocket = None
-        self.monitoring_task: asyncio.Task = None
-        self.warning_sent: bool = False
-        self._disconnecting: bool = False
+        # Support multiple connections per user
+        self.user_connections: dict = {}  # user_id -> list of WebSocket connections
+        self.connection_tasks: dict = {}  # connection_id -> monitoring task
+        self.warning_sent: dict = {}  # connection_id -> warning status
+        self._disconnecting: set = set()  # Set of disconnecting connection IDs
     
     async def connect(self, websocket: WebSocket, token: str):
         """Connect to WebSocket and start monitoring."""
-        logger.info("WebSocket manager: Connecting new WebSocket")
-        # Disconnect any existing connection first
-        if self.websocket:
-            logger.info("WebSocket manager: Disconnecting existing connection")
-            await self.disconnect()
-        
-        self.websocket = websocket
-        self.warning_sent = False
-        self._disconnecting = False
-        
-        # Start monitoring task
-        self.monitoring_task = asyncio.create_task(
-            self.monitor_token(token)
-        )
-        logger.info("WebSocket manager: Connection established and monitoring started")
-    
-    async def disconnect(self):
-        """Disconnect from WebSocket."""
-        if self._disconnecting:
-            logger.debug("WebSocket manager: Already disconnecting, skipping")
-            return  # Already disconnecting
-        
-        logger.info("WebSocket manager: Starting disconnection")
-        self._disconnecting = True
-        
-        # Cancel monitoring task first
-        if self.monitoring_task and not self.monitoring_task.done():
-            logger.debug("WebSocket manager: Cancelling monitoring task")
-            self.monitoring_task.cancel()
+        try:
+            # Verify token to get user_id
+            from jose import jwt
+            from app.config import SECRET_KEY, ALGORITHM
+            
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            user_id = payload.get("sub")
+            
+            if not user_id:
+                logger.error("WebSocket manager: Invalid token, no user_id")
+                await websocket.close(code=4001, reason="Invalid token")
+                return
+            
+            # Generate unique connection ID
+            import uuid
+            connection_id = str(uuid.uuid4())
+            
+            logger.info(f"WebSocket manager: Connecting new WebSocket for user {user_id}, connection {connection_id}")
+            
+            # Initialize user connections list if needed
+            if user_id not in self.user_connections:
+                self.user_connections[user_id] = []
+            
+            # Add connection to user's connection list
+            connection_info = {
+                "websocket": websocket,
+                "connection_id": connection_id,
+                "user_id": user_id,
+                "token": token
+            }
+            self.user_connections[user_id].append(connection_info)
+            
+            # Initialize warning status for this connection
+            self.warning_sent[connection_id] = False
+            
+            # Start monitoring task for this specific connection
+            monitoring_task = asyncio.create_task(
+                self.monitor_token(connection_id, token)
+            )
+            self.connection_tasks[connection_id] = monitoring_task
+            
+            logger.info(f"WebSocket manager: Connection {connection_id} established for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"WebSocket manager: Connection error: {e}")
             try:
-                await self.monitoring_task
-            except asyncio.CancelledError:
+                await websocket.close(code=4000, reason="Connection error")
+            except Exception:
                 pass
-            self.monitoring_task = None
+    
+    async def disconnect(self, connection_id: str = None):
+        """Disconnect a specific WebSocket connection."""
+        if connection_id and connection_id in self._disconnecting:
+            logger.debug(f"WebSocket manager: Connection {connection_id} already disconnecting, skipping")
+            return
         
-        # Close WebSocket connection
-        if self.websocket:
-            try:
-                logger.debug("WebSocket manager: Closing WebSocket connection")
-                await self.websocket.close()
-            except Exception as e:
-                logger.debug(f"Error closing WebSocket: {e}")
-            finally:
-                self.websocket = None
+        if connection_id:
+            await self._disconnect_connection(connection_id)
+        else:
+            # Disconnect all connections (for backward compatibility)
+            logger.warning("WebSocket manager: Disconnect called without connection_id, disconnecting all")
+            for user_id in list(self.user_connections.keys()):
+                for conn_info in list(self.user_connections[user_id]):
+                    await self._disconnect_connection(conn_info["connection_id"])
+    
+    async def _disconnect_connection(self, connection_id: str):
+        """Disconnect a specific connection."""
+        logger.info(f"WebSocket manager: Starting disconnection for connection {connection_id}")
+        self._disconnecting.add(connection_id)
         
-        self.warning_sent = False
-        self._disconnecting = False
-        logger.info("WebSocket manager: Disconnection completed")
+        try:
+            # Cancel monitoring task
+            if connection_id in self.connection_tasks:
+                task = self.connection_tasks[connection_id]
+                if not task.done():
+                    logger.debug(f"WebSocket manager: Cancelling monitoring task for {connection_id}")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                del self.connection_tasks[connection_id]
+            
+            # Find and remove connection from user_connections
+            for user_id in list(self.user_connections.keys()):
+                self.user_connections[user_id] = [
+                    conn for conn in self.user_connections[user_id] 
+                    if conn["connection_id"] != connection_id
+                ]
+                
+                # Remove user if no more connections
+                if not self.user_connections[user_id]:
+                    del self.user_connections[user_id]
+            
+            # Clean up connection-specific data
+            if connection_id in self.warning_sent:
+                del self.warning_sent[connection_id]
+            
+            logger.info(f"WebSocket manager: Disconnection completed for {connection_id}")
+            
+        except Exception as e:
+            logger.error(f"WebSocket manager: Error during disconnection of {connection_id}: {e}")
+        finally:
+            self._disconnecting.discard(connection_id)
+    
+    async def disconnect_user(self, user_id: str):
+        """Disconnect all connections for a specific user."""
+        logger.info(f"WebSocket manager: Disconnecting all connections for user {user_id}")
+        if user_id in self.user_connections:
+            for conn_info in list(self.user_connections[user_id]):
+                await self._disconnect_connection(conn_info["connection_id"])
+    
+    async def disconnect_by_websocket(self, websocket: WebSocket):
+        """Disconnect a specific connection by WebSocket object."""
+        # Find the connection that matches this websocket
+        for user_id in list(self.user_connections.keys()):
+            for conn_info in list(self.user_connections[user_id]):
+                if conn_info["websocket"] == websocket:
+                    logger.info(f"WebSocket manager: Found connection {conn_info['connection_id']} for websocket, disconnecting")
+                    await self._disconnect_connection(conn_info["connection_id"])
+                    return
+        logger.warning("WebSocket manager: Could not find connection for websocket")
+    
+    def get_connection_count(self, user_id: str = None) -> int:
+        """Get connection count for a user or total connections."""
+        if user_id:
+            return len(self.user_connections.get(user_id, []))
+        else:
+            total = 0
+            for user_connections in self.user_connections.values():
+                total += len(user_connections)
+            return total
+    
+    def is_connected(self, user_id: str = None) -> bool:
+        """Check if user is connected or if any connections exist."""
+        if user_id:
+            return user_id in self.user_connections and len(self.user_connections[user_id]) > 0
+        else:
+            return len(self.user_connections) > 0
+    
+    def get_connection_stats(self) -> dict:
+        """Get detailed connection statistics for debugging."""
+        stats = {
+            "total_users": len(self.user_connections),
+            "total_connections": 0,
+            "users": {}
+        }
+        
+        for user_id, connections in self.user_connections.items():
+            stats["total_connections"] += len(connections)
+            stats["users"][user_id] = {
+                "connection_count": len(connections),
+                "connection_ids": [conn["connection_id"] for conn in connections]
+            }
+        
+        return stats
     
     def calculate_sleep_time(self, time_remaining: int) -> int:
         """Calculate smart sleep time based on token expiration."""
@@ -90,14 +199,14 @@ class WebSocketManager:
         else:  # < 10 seconds
             return 5    # 5 seconds
     
-    async def monitor_token(self, token: str):
+    async def monitor_token(self, connection_id: str, token: str):
         """Monitor JWT token and send warning when below 60 seconds."""
         try:
-            logger.info(f"Starting token monitoring for token: {token[:20]}...")
+            logger.info(f"Starting token monitoring for connection {connection_id}")
             while True:
                 # Check if connection is still active
-                if not self.websocket or self._disconnecting:
-                    logger.info("WebSocket connection lost or disconnecting, stopping monitoring")
+                if connection_id not in self.connection_tasks or connection_id in self._disconnecting:
+                    logger.info(f"Connection {connection_id} lost or disconnecting, stopping monitoring")
                     break
                 
                 # Decode JWT token to get expiration time
@@ -110,7 +219,7 @@ class WebSocketManager:
                     exp_timestamp = payload.get("exp")
                     
                     if not exp_timestamp:
-                        logger.warning("JWT token has no expiration time, stopping monitoring")
+                        logger.warning(f"JWT token for connection {connection_id} has no expiration time, stopping monitoring")
                         break
                     
                     # Calculate time remaining

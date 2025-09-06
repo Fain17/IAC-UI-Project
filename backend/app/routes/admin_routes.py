@@ -80,6 +80,52 @@ class RolePermissionRemoveMultiple(BaseModel):
     permissions: List[str]  # list of permissions to remove: ["read", "write", "delete"]
     resource_type: str  # workflow, user, group, system, etc.
 
+async def invalidate_sessions_for_role(role: str):
+    """Invalidate all active sessions for users with a specific role."""
+    try:
+        from app.db.repositories import UserRepository, UserSessionRepository
+        
+        logger.info(f"Starting session invalidation for role: {role}")
+        
+        # Get all users with this role
+        users = await get_all_users()
+        logger.info(f"Found {len(users)} total users in system")
+        
+        affected_users = []
+        
+        for user in users:
+            user_id = user["id"]
+            logger.info(f"Checking user {user_id} for role {role}")
+            
+            permissions = await get_user_permissions(user_id)
+            logger.info(f"User {user_id} permissions: {permissions}")
+            
+            if permissions and permissions.get("role") == role:
+                logger.info(f"User {user_id} has role {role}, invalidating sessions...")
+                
+                # Get current sessions for this user
+                current_sessions = await UserSessionRepository.get_all_for_user(user_id)
+                logger.info(f"User {user_id} has {len(current_sessions)} active sessions")
+                
+                # Invalidate all sessions for this user
+                delete_success = await UserSessionRepository.delete_all_for_user(user_id)
+                if delete_success:
+                    affected_users.append(user_id)
+                    logger.info(f"Successfully invalidated sessions for user {user_id}")
+                else:
+                    logger.warning(f"Failed to invalidate sessions for user {user_id}")
+            else:
+                logger.info(f"User {user_id} does not have role {role}, skipping")
+        
+        logger.info(f"Session invalidation complete. Affected {len(affected_users)} users with role '{role}': {affected_users}")
+        return len(affected_users)
+        
+    except Exception as e:
+        logger.error(f"Error invalidating sessions for role {role}: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return 0
+
 class RolePermissionResponse(BaseModel):
     role: str
     permission: str
@@ -843,6 +889,54 @@ async def test_admin_access_route(
         
     except Exception as e:
         logger.error(f"Error testing admin access: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/debug/sessions", tags=["Admin Debug"])
+async def debug_sessions_route(
+    current_user: dict = Depends(get_current_admin_user)
+):
+    """
+    Debug route to check current session status (admin only).
+    This helps troubleshoot session invalidation issues.
+    """
+    try:
+        from app.db.repositories import UserSessionRepository
+        
+        # Get all active sessions
+        all_sessions = await UserSessionRepository.get_all_active_sessions()
+        
+        # Group sessions by user
+        sessions_by_user = {}
+        for session in all_sessions:
+            user_id = session["user_id"]
+            if user_id not in sessions_by_user:
+                sessions_by_user[user_id] = []
+            sessions_by_user[user_id].append(session)
+        
+        # Get user details for each session
+        user_details = {}
+        for user_id in sessions_by_user.keys():
+            user = await get_user_by_id(user_id)
+            if user:
+                permissions = await get_user_permissions(user_id)
+                user_details[user_id] = {
+                    "username": user.get("username"),
+                    "email": user.get("email"),
+                    "role": permissions.get("role") if permissions else "unknown",
+                    "session_count": len(sessions_by_user[user_id])
+                }
+        
+        return JSONResponse({
+            "success": True,
+            "total_active_sessions": len(all_sessions),
+            "users_with_sessions": len(sessions_by_user),
+            "sessions_by_user": sessions_by_user,
+            "user_details": user_details,
+            "note": "This shows all currently active sessions and their associated users"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error debugging sessions: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") 
 
 # Role Permission Management Endpoints
@@ -1097,6 +1191,9 @@ async def add_role_permission_route(
         if not success:
             raise HTTPException(status_code=500, detail="Failed to add permission")
         
+        # INVALIDATE SESSIONS FOR ALL USERS WITH THIS ROLE
+        affected_users_count = await invalidate_sessions_for_role(permission_data.role)
+        
         return JSONResponse({
             "success": True,
             "message": f"Permission {permission_data.permission} added to role {permission_data.role} for resource {permission_data.resource_type}",
@@ -1104,7 +1201,12 @@ async def add_role_permission_route(
                 "role": permission_data.role,
                 "permission": permission_data.permission,
                 "resource_type": permission_data.resource_type
-            }
+            },
+            "session_invalidation": {
+                "affected_users_count": affected_users_count,
+                "message": f"All active sessions for {affected_users_count} users with role '{permission_data.role}' have been invalidated"
+            },
+            "note": "Users with this role will need to log in again to get updated permissions."
         }, status_code=201)
         
     except HTTPException:
@@ -1184,6 +1286,9 @@ async def remove_role_permission_route(
         if not success:
             raise HTTPException(status_code=500, detail="Failed to remove permission")
         
+        # INVALIDATE SESSIONS FOR ALL USERS WITH THIS ROLE
+        affected_users_count = await invalidate_sessions_for_role(permission_data.role)
+        
         return JSONResponse({
             "success": True,
             "message": f"Permission {permission_data.permission} removed from role {permission_data.role} for resource {permission_data.resource_type}",
@@ -1191,7 +1296,12 @@ async def remove_role_permission_route(
                 "role": permission_data.role,
                 "permission": permission_data.permission,
                 "resource_type": permission_data.resource_type
-            }
+            },
+            "session_invalidation": {
+                "affected_users_count": affected_users_count,
+                "message": f"All active sessions for {affected_users_count} users with role '{permission_data.role}' have been invalidated"
+            },
+            "note": "Users with this role will need to log in again to get updated permissions."
         })
         
     except HTTPException:
@@ -1284,6 +1394,9 @@ async def remove_multiple_role_permissions_route(
             else:
                 failed_permissions.append(permission)
         
+        # INVALIDATE SESSIONS FOR ALL USERS WITH THIS ROLE
+        affected_users_count = await invalidate_sessions_for_role(permission_data.role)
+        
         return JSONResponse({
             "success": True,
             "message": f"Removed {len(removed_permissions)} permissions from role {permission_data.role}",
@@ -1293,7 +1406,12 @@ async def remove_multiple_role_permissions_route(
             "failed_permissions": failed_permissions,
             "total_requested": len(permission_data.permissions),
             "total_removed": len(removed_permissions),
-            "total_failed": len(failed_permissions)
+            "total_failed": len(failed_permissions),
+            "session_invalidation": {
+                "affected_users_count": affected_users_count,
+                "message": f"All active sessions for {affected_users_count} users with role '{permission_data.role}' have been invalidated"
+            },
+            "note": "Users with this role will need to log in again to get updated permissions."
         })
         
     except HTTPException:
@@ -1447,13 +1565,21 @@ async def reset_role_permissions_route(
         for role_name, permission, resource_type in default_permissions:
             await RolePermissionRepository.add_permission(role_name, permission, resource_type)
         
+        # INVALIDATE SESSIONS FOR ALL USERS WITH THIS ROLE
+        affected_users_count = await invalidate_sessions_for_role(role)
+        
         return JSONResponse({
             "success": True,
             "message": f"Role {role} permissions reset to defaults",
             "role": role,
             "default_permissions": default_permissions,
             "removed_permissions_count": len(current_permissions),
-            "added_permissions_count": len(default_permissions)
+            "added_permissions_count": len(default_permissions),
+            "session_invalidation": {
+                "affected_users_count": affected_users_count,
+                "message": f"All active sessions for {affected_users_count} users with role '{role}' have been invalidated"
+            },
+            "note": "Users with this role will need to log in again to get updated permissions."
         })
         
     except HTTPException:
@@ -1511,6 +1637,12 @@ async def reset_all_role_permissions_route(
         
         total_permissions = len(admin_permissions) + len(manager_permissions) + len(viewer_permissions)
         
+        # INVALIDATE SESSIONS FOR ALL USERS (since all roles were reset)
+        total_affected = 0
+        for role in ["admin", "manager", "viewer"]:
+            affected_count = await invalidate_sessions_for_role(role)
+            total_affected += affected_count
+        
         return JSONResponse({
             "success": True,
             "message": "All role permissions reset to defaults successfully",
@@ -1524,7 +1656,12 @@ async def reset_all_role_permissions_route(
                 "admin_permissions": admin_permissions,
                 "manager_permissions": manager_permissions,
                 "viewer_permissions": viewer_permissions
-            }
+            },
+            "session_invalidation": {
+                "total_affected_users": total_affected,
+                "message": f"All active sessions for {total_affected} users have been invalidated"
+            },
+            "note": "All users will need to log in again to get updated permissions."
         })
         
     except HTTPException:
