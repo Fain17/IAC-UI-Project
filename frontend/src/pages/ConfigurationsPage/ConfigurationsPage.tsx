@@ -1,13 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { 
-  getDockerMappings, 
-  createDockerMapping, 
-  updateDockerMapping, 
-  deleteDockerMapping,
-  DockerMapping,
-  CreateDockerMappingRequest,
-  UpdateDockerMappingRequest,
   getResourceMappings,
   createResourceMapping,
   updateResourceMapping,
@@ -25,234 +18,6 @@ import {
   UpdateVaultConfigRequest
 } from '../../api';
 import './ConfigurationsPage.css';
-
-// Docker Mapping Modal Component
-interface DockerMappingModalProps {
-  mapping?: DockerMapping | null;
-  onSubmit: (data: CreateDockerMappingRequest) => void;
-  onCancel: () => void;
-  acceptedScriptTypes: string[];
-}
-
-const DockerMappingModal: React.FC<DockerMappingModalProps> = ({ 
-  mapping, 
-  onSubmit, 
-  onCancel, 
-  acceptedScriptTypes 
-}) => {
-  const [formData, setFormData] = useState<CreateDockerMappingRequest>({
-    script_type: mapping?.script_type || 'python',
-    docker_image: mapping?.docker_image || '',
-    docker_tag: mapping?.docker_tag || 'latest',
-    description: mapping?.description || '',
-    environment_variables: mapping?.environment_variables || {},
-    volumes: mapping?.volumes || [],
-    ports: mapping?.ports || [],
-    is_active: mapping?.is_active ?? true
-  });
-
-  const [envKey, setEnvKey] = useState('');
-  const [envValue, setEnvValue] = useState('');
-  const [volumePath, setVolumePath] = useState('');
-  const [portMapping, setPortMapping] = useState('');
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit(formData);
-  };
-
-  const addEnvironmentVariable = () => {
-    if (envKey && envValue) {
-      setFormData(prev => ({
-        ...prev,
-        environment_variables: { ...prev.environment_variables, [envKey]: envValue }
-      }));
-      setEnvKey('');
-      setEnvValue('');
-    }
-  };
-
-  const removeEnvironmentVariable = (key: string) => {
-    const newEnvVars = { ...formData.environment_variables };
-    delete newEnvVars[key];
-    setFormData(prev => ({ ...prev, environment_variables: newEnvVars }));
-  };
-
-  const addVolume = () => {
-    if (volumePath) {
-      setFormData(prev => ({ ...prev, volumes: [...prev.volumes, volumePath] }));
-      setVolumePath('');
-    }
-  };
-
-  const removeVolume = (index: number) => {
-    setFormData(prev => ({ ...prev, volumes: prev.volumes.filter((_, i) => i !== index) }));
-  };
-
-  const addPort = () => {
-    if (portMapping) {
-      setFormData(prev => ({ ...prev, ports: [...prev.ports, portMapping] }));
-      setPortMapping('');
-    }
-  };
-
-  const removePort = (index: number) => {
-    setFormData(prev => ({ ...prev, ports: prev.ports.filter((_, i) => i !== index) }));
-  };
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal docker-mapping-modal">
-        <h3>{mapping ? 'Edit Docker Mapping' : 'Create Docker Mapping'}</h3>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="script_type">Script Type *</label>
-            <select
-              id="script_type"
-              value={formData.script_type}
-              onChange={(e) => setFormData(prev => ({ ...prev, script_type: e.target.value }))}
-              required
-            >
-              {acceptedScriptTypes.map(type => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="docker_image">Docker Image *</label>
-            <input
-              id="docker_image"
-              type="text"
-              value={formData.docker_image}
-              onChange={(e) => setFormData(prev => ({ ...prev, docker_image: e.target.value }))}
-              placeholder="e.g., custom-python:3.9"
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="docker_tag">Docker Tag *</label>
-            <input
-              id="docker_tag"
-              type="text"
-              value={formData.docker_tag}
-              onChange={(e) => setFormData(prev => ({ ...prev, docker_tag: e.target.value }))}
-              placeholder="e.g., latest"
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="description">Description *</label>
-            <textarea
-              id="description"
-              value={formData.description}
-              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-              placeholder="e.g., Custom Python 3.9 environment"
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Environment Variables</label>
-            <div className="env-vars-input">
-              <input
-                type="text"
-                placeholder="Key"
-                value={envKey}
-                onChange={(e) => setEnvKey(e.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="Value"
-                value={envValue}
-                onChange={(e) => setEnvValue(e.target.value)}
-              />
-              <button type="button" onClick={addEnvironmentVariable} className="add-button">
-                Add
-              </button>
-            </div>
-            {Object.entries(formData.environment_variables).map(([key, value]) => (
-              <div key={key} className="env-var-item">
-                <span>{key}={value}</span>
-                <button type="button" onClick={() => removeEnvironmentVariable(key)} className="remove-button">
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="form-group">
-            <label>Volumes</label>
-            <div className="array-input">
-              <input
-                type="text"
-                placeholder="e.g., /host/data:/container/data"
-                value={volumePath}
-                onChange={(e) => setVolumePath(e.target.value)}
-              />
-              <button type="button" onClick={addVolume} className="add-button">
-                Add
-              </button>
-            </div>
-            {formData.volumes.map((volume, index) => (
-              <div key={index} className="array-item">
-                <span>{volume}</span>
-                <button type="button" onClick={() => removeVolume(index)} className="remove-button">
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="form-group">
-            <label>Ports</label>
-            <div className="array-input">
-              <input
-                type="text"
-                placeholder="e.g., 8080:8080"
-                value={portMapping}
-                onChange={(e) => setPortMapping(e.target.value)}
-              />
-              <button type="button" onClick={addPort} className="add-button">
-                Add
-              </button>
-            </div>
-            {formData.ports.map((port, index) => (
-              <div key={index} className="array-item">
-                <span>{port}</span>
-                <button type="button" onClick={() => removePort(index)} className="remove-button">
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="form-group">
-            <label>
-              <input
-                type="checkbox"
-                checked={formData.is_active}
-                onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))}
-              />
-              Active
-            </label>
-          </div>
-
-          <div className="modal-buttons">
-            <button type="submit" className="modal-button confirm">
-              {mapping ? 'Update' : 'Create'}
-            </button>
-            <button type="button" onClick={onCancel} className="modal-button cancel">
-              Cancel
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
 
 // Resource Mapping Modal Component
 interface ResourceMappingModalProps {
@@ -558,13 +323,8 @@ const VaultConfigModal: React.FC<VaultConfigModalProps> = ({
 
 const ConfigurationsPage: React.FC = () => {
   const location = useLocation();
-  const [dockerMappings, setDockerMappings] = useState<DockerMapping[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingMapping, setEditingMapping] = useState<DockerMapping | null>(null);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deletingMapping, setDeletingMapping] = useState<DockerMapping | null>(null);
   
   // Resource mapping states
   const [resourceMappings, setResourceMappings] = useState<ResourceMapping[]>([]);
@@ -581,40 +341,10 @@ const ConfigurationsPage: React.FC = () => {
   const [deletingVaultConfig, setDeletingVaultConfig] = useState<VaultConfig | null>(null);
   const [testingConnection, setTestingConnection] = useState<string | null>(null);
 
-  const active = useMemo<'docker' | 'custom' | 'vault'>(() => {
-    if (location.pathname.startsWith('/configurations/custom')) return 'custom';
+  const active = useMemo<'custom' | 'vault'>(() => {
     if (location.pathname.startsWith('/configurations/vault')) return 'vault';
-    return 'docker';
+    return 'custom';
   }, [location.pathname]);
-
-  // Accepted script types
-  const acceptedScriptTypes = [
-    'python', 'nodejs', 'ansible', 'terraform', 'sh', 'bash', 'zsh'
-  ];
-
-  // Fetch Docker mappings
-  const fetchDockerMappings = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await getDockerMappings();
-      if (response.data.success) {
-        setDockerMappings(response.data.mappings);
-      }
-    } catch (err: any) {
-      console.error('Error fetching Docker mappings:', err);
-      setError(err.response?.data?.detail || 'Failed to fetch Docker mappings');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Load Docker mappings when docker tab is active
-  useEffect(() => {
-    if (active === 'docker') {
-      fetchDockerMappings();
-    }
-  }, [active]);
 
   // Fetch resource mappings
   const fetchResourceMappings = async () => {
@@ -673,63 +403,6 @@ const ConfigurationsPage: React.FC = () => {
   useEffect(() => {
     setVaultConfigs([]);
   }, []);
-
-  // Handle create Docker mapping
-  const handleCreateMapping = async (data: CreateDockerMappingRequest) => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await createDockerMapping(data);
-      if (response.data.success) {
-        setShowCreateModal(false);
-        fetchDockerMappings();
-      }
-    } catch (err: any) {
-      console.error('Error creating Docker mapping:', err);
-      setError(err.response?.data?.detail || 'Failed to create Docker mapping');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle update Docker mapping
-  const handleUpdateMapping = async (mappingId: string, data: UpdateDockerMappingRequest) => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await updateDockerMapping(mappingId, data);
-      if (response.data.success) {
-        setEditingMapping(null);
-        fetchDockerMappings();
-      }
-    } catch (err: any) {
-      console.error('Error updating Docker mapping:', err);
-      setError(err.response?.data?.detail || 'Failed to update Docker mapping');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle delete Docker mapping
-  const handleDeleteMapping = async () => {
-    if (!deletingMapping) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await deleteDockerMapping(deletingMapping.id);
-      if (response.data.success) {
-        setShowDeleteModal(false);
-        setDeletingMapping(null);
-        fetchDockerMappings();
-      }
-    } catch (err: any) {
-      console.error('Error deleting Docker mapping:', err);
-      setError(err.response?.data?.detail || 'Failed to delete Docker mapping');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Handle create resource mapping
   const handleCreateResourceMapping = async (data: CreateResourceMappingRequest) => {
@@ -864,16 +537,6 @@ const ConfigurationsPage: React.FC = () => {
     }
   };
 
-  // Format environment variables for display
-  const formatEnvVars = (envVars: Record<string, string>) => {
-    return Object.entries(envVars).map(([key, value]) => `${key}=${value}`).join(', ');
-  };
-
-  // Format arrays for display
-  const formatArray = (arr: string[]) => {
-    return arr.join(', ');
-  };
-
   return (
     <div>
       <div className="workflows-content">
@@ -881,95 +544,6 @@ const ConfigurationsPage: React.FC = () => {
           <h1>Configurations</h1>
         </div>
         <div className="workflows-body">
-          {active === 'docker' && (
-            <div className="docker-mappings-section">
-              <div className="section-header">
-              <h2>Docker Execution Mapping</h2>
-                <button 
-                  onClick={() => setShowCreateModal(true)}
-                  className="create-button"
-                >
-                  + Create Mapping
-                </button>
-              </div>
-
-              {error && (
-                <div className="error-message">
-                  {error}
-                  <button onClick={fetchDockerMappings} className="retry-button">
-                    Retry
-                  </button>
-                </div>
-              )}
-
-              {loading ? (
-                <div className="loading-spinner">Loading...</div>
-              ) : dockerMappings.length === 0 ? (
-                <div className="no-mappings">
-                  <p>No Docker mappings found. Create your first mapping to get started.</p>
-                </div>
-              ) : (
-                <div className="mappings-grid">
-                  {dockerMappings.map((mapping) => (
-                    <div key={mapping.id} className="mapping-card">
-                      <div className="mapping-header">
-                        <h3>{mapping.script_type}</h3>
-                        <div className="mapping-actions">
-                          <button 
-                            onClick={() => setEditingMapping(mapping)}
-                            className="edit-button"
-                            title="Edit Mapping"
-                          >
-                            ✏️
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setDeletingMapping(mapping);
-                              setShowDeleteModal(true);
-                            }}
-                            className="delete-button"
-                            title="Delete Mapping"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </div>
-                      
-                      <div className="mapping-details">
-                        <div className="detail-row">
-                          <strong>Image:</strong> {mapping.docker_image}:{mapping.docker_tag}
-                        </div>
-                        <div className="detail-row">
-                          <strong>Description:</strong> {mapping.description}
-                        </div>
-                        {Object.keys(mapping.environment_variables).length > 0 && (
-                          <div className="detail-row">
-                            <strong>Environment:</strong> {formatEnvVars(mapping.environment_variables)}
-                          </div>
-                        )}
-                        {mapping.volumes.length > 0 && (
-                          <div className="detail-row">
-                            <strong>Volumes:</strong> {formatArray(mapping.volumes)}
-                          </div>
-                        )}
-                        {mapping.ports.length > 0 && (
-                          <div className="detail-row">
-                            <strong>Ports:</strong> {formatArray(mapping.ports)}
-                          </div>
-                        )}
-                        <div className="detail-row">
-                          <strong>Status:</strong> 
-                          <span className={`status-badge ${mapping.is_active ? 'active' : 'inactive'}`}>
-                            {mapping.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           {active === 'custom' && (
             <div className="custom-mappings-section">
               <div className="section-header">
@@ -1176,22 +750,6 @@ const ConfigurationsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Create/Edit Docker Mapping Modal */}
-      {(showCreateModal || editingMapping) && (
-        <DockerMappingModal
-          mapping={editingMapping}
-          onSubmit={editingMapping ? 
-            (data) => handleUpdateMapping(editingMapping.id, data) : 
-            handleCreateMapping
-          }
-          onCancel={() => {
-            setShowCreateModal(false);
-            setEditingMapping(null);
-          }}
-          acceptedScriptTypes={acceptedScriptTypes}
-        />
-      )}
-
       {/* Create/Edit Resource Mapping Modal */}
       {(showResourceCreateModal || editingResourceMapping) && (
         <ResourceMappingModal
@@ -1205,35 +763,6 @@ const ConfigurationsPage: React.FC = () => {
             setEditingResourceMapping(null);
           }}
         />
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && deletingMapping && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <h3>Confirm Deletion</h3>
-            <p>Are you sure you want to delete the Docker mapping for <strong>{deletingMapping.script_type}</strong>?</p>
-            <p>This action cannot be undone.</p>
-            <div className="modal-buttons">
-              <button
-                onClick={handleDeleteMapping}
-                disabled={loading}
-                className="modal-button confirm"
-              >
-                {loading ? 'Deleting...' : 'Delete'}
-              </button>
-              <button
-                onClick={() => {
-                  setShowDeleteModal(false);
-                  setDeletingMapping(null);
-                }}
-                className="modal-button cancel"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Resource Mapping Delete Confirmation Modal */}

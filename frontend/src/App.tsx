@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AdminProfilePage from './pages/AdminProfilePage';
 import ConfigurationsPage from './pages/ConfigurationsPage';
+import DockerMappingsPage from './pages/DockerMappingsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import AppLayout from './components/AppLayout';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -84,9 +85,18 @@ const App: React.FC = () => {
             </ProtectedRoute>
           } 
         />
-        <Route path="/configurations/docker" element={<ProtectedRoute><AppLayout><ConfigurationsPage /></AppLayout></ProtectedRoute>} />
         <Route path="/configurations/custom" element={<ProtectedRoute><AppLayout><ConfigurationsPage /></AppLayout></ProtectedRoute>} />
         <Route path="/configurations/vault" element={<ProtectedRoute><AppLayout><ConfigurationsPage /></AppLayout></ProtectedRoute>} />
+        <Route 
+          path="/docker-mappings" 
+          element={
+            <ProtectedRoute>
+              <AppLayout>
+                <DockerMappingsPage />
+              </AppLayout>
+            </ProtectedRoute>
+          } 
+        />
         <Route 
           path="/settings" 
           element={
